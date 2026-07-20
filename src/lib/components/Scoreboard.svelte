@@ -69,22 +69,6 @@
     return fmtRatio(Math.max(c, k), Math.min(c, k));
   }
 
-  let summary = $derived.by(() => {
-    if (!hasRun) return null;
-    if (verdicts && verdicts.catalog.state !== 'pending' && verdicts.code.state !== 'pending') {
-      const cOk = verdicts.catalog.state === 'correct';
-      const kOk = verdicts.code.state === 'correct';
-      if (cOk !== kOk) return { text: `only ${kOk ? 'code' : 'catalog'} matched ground truth`, dir: kOk ? 'code' : 'catalog' };
-    }
-    const tokWin = winner(catalog.metrics.totalTokens, code.metrics.totalTokens);
-    const latWin = winner(catalog.metrics.elapsedMs, code.metrics.elapsedMs);
-    if (tokWin === 'tie' && latWin === 'tie') return { text: '≈ dead heat', dir: 'tie' };
-    if (tokWin === latWin) return { text: `${tokWin} leaner & faster`, dir: tokWin };
-    const parts: string[] = [];
-    if (tokWin !== 'tie') parts.push(`${tokWin} leaner`);
-    if (latWin !== 'tie') parts.push(`${latWin} faster`);
-    return { text: parts.join(' · '), dir: tokWin !== 'tie' ? tokWin : latWin };
-  });
 </script>
 
 <aside class="ledger" data-empty={!hasRun}>
@@ -181,15 +165,7 @@
     {/if}
   </div>
 
-  {#if summary}
-    <div class="ledger-verdict">
-      <span class="chip" data-dir={summary.dir}>{summary.text}</span>
-    </div>
-  {:else}
-    <div class="ledger-verdict">
-      <span class="hint">pick a task or type a prompt<br />to fill the ledger</span>
-    </div>
-  {/if}
+
 </aside>
 
 <style>

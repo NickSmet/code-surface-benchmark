@@ -143,7 +143,7 @@
 <div class="bench-shell">
   <header class="bench-header">
     <div class="title-block">
-      <div class="title">From Tools to Code Surfaces</div>
+      <div class="title">Tool Catalog vs Code Surface</div>
       <div class="subtitle">Same model, same task, same data — two surfaces, side by side.</div>
     </div>
 
