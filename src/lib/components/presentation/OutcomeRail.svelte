@@ -70,7 +70,7 @@
       },
       {
         key: 'cost',
-        label: 'cost',
+        label: 'est. cost',
         value: fmtUsd(panel.metrics.costUsd),
         delta: deltaLabel(panel.metrics.costUsd - other.metrics.costUsd, fmtUsd),
         tone: tone(panel.metrics.costUsd - other.metrics.costUsd)

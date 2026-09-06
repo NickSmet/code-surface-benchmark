@@ -34,7 +34,7 @@
       fineK: `${fmtInt(code.metrics.promptTokens)} in (${fmtInt(code.metrics.cachedPromptTokens)} cached) / ${fmtInt(code.metrics.completionTokens)} out`
     },
     {
-      label: 'Round trips',
+      label: 'Model turns',
       c: catalog.metrics.turns,
       k: code.metrics.turns,
       fmt: String,
@@ -42,7 +42,7 @@
       fineK: `${code.metrics.toolCalls} tool call${code.metrics.toolCalls === 1 ? '' : 's'}`
     },
     {
-      label: 'Cost',
+      label: 'Est. cost',
       c: catalog.metrics.costUsd,
       k: code.metrics.costUsd,
       fmt: fmtUsd,
@@ -147,9 +147,9 @@
           {#if entry.v.state === 'pending'}
             <span class="verdict pending" class:right={i === 1}>…</span>
           {:else if entry.v.state === 'correct'}
-            <span class="verdict correct" class:right={i === 1}><Check size={11} /> correct</span>
+            <span class="verdict correct" class:right={i === 1}><Check size={11} /> checks passed</span>
           {:else}
-            <span class="verdict wrong" class:right={i === 1}><X size={11} /> wrong</span>
+            <span class="verdict wrong" class:right={i === 1}><X size={11} /> check failed</span>
           {/if}
         {/each}
       </div>
@@ -310,27 +310,4 @@
     color: #991b1b;
   }
 
-  .ledger-verdict {
-    margin-top: auto;
-    border-top: 1px solid var(--color-border-default);
-    padding-top: 9px;
-    display: flex;
-    justify-content: center;
-    text-align: center;
-  }
-  .ledger-verdict .chip {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    border-radius: 3px;
-    padding: 2px 8px;
-  }
-  .ledger-verdict .chip[data-dir='catalog'] { color: var(--catalog); background: var(--catalog-bg); border: 1px solid var(--catalog-border); }
-  .ledger-verdict .chip[data-dir='code'] { color: var(--code); background: var(--code-bg); border: 1px solid var(--code-border); }
-  .ledger-verdict .chip[data-dir='tie'] { color: var(--warn); background: var(--warn-bg); border: 1px solid #FDE68A; }
-  .ledger-verdict .hint {
-    font-size: 10.5px;
-    color: var(--color-text-dim);
-    line-height: 1.5;
-  }
 </style>

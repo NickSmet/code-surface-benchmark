@@ -15,7 +15,7 @@
   let { panel, active, selectedSeq, onSelectLane, onSelectTool }: Props = $props();
 
   let toolItems = $derived(panel.items.filter((i): i is Extract<TranscriptItem, { kind: 'tool' }> => i.kind === 'tool'));
-  let tag = $derived(panel.surface === 'catalog' ? 'classic MCP' : 'code surface');
+  let tag = $derived(panel.surface === 'catalog' ? 'tool catalog' : 'code surface');
   let activityLabel = $derived(panel.metrics.toolCalls === 1 ? 'tool call' : 'tool calls');
   type ToolItem = Extract<TranscriptItem, { kind: 'tool' }>;
 
@@ -82,7 +82,7 @@
         </div>
         <div class="metric">
           <strong>{panel.metrics.turns}</strong>
-          <span>round trips</span>
+          <span>model turns</span>
         </div>
         <div class="metric">
           <strong>{fmtInt(panel.metrics.totalTokens)}</strong>

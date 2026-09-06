@@ -4,7 +4,7 @@
  * including one counter-case where the catalogue is competitive.
  */
 
-export type ExpectedWinner = 'code' | 'catalog';
+export type ExpectedWinner = 'code' | 'catalog' | 'tie';
 
 export interface BenchTask {
   id: string;
@@ -43,7 +43,7 @@ export const TASKS: BenchTask[] = [
   {
     id: 'single-lookup',
     label: 'Single lookup',
-    description: 'One trivial fact — where a single tool call is generally more effecient.',
+    description: 'One narrow lookup — where a direct tool can be competitive.',
     prompt: 'How many resource groups are in the Production subscription, and what are their names?',
     expect: 'tie'
   }

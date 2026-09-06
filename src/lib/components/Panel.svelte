@@ -12,7 +12,7 @@
   }
   let { panel }: Props = $props();
 
-  let tag = $derived(panel.surface === 'catalog' ? 'classic MCP · tool catalog' : 'code-based MCP · single object tool');
+  let tag = $derived(panel.surface === 'catalog' ? 'per-resource tool catalog' : 'code · projected object');
   const phaseLabel: Record<string, string> = {
     thinking: 'reasoning',
     calling: 'running tools',
