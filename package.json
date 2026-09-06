@@ -14,7 +14,8 @@
     "sync": "svelte-kit sync",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "seed:demo": "tsx scripts/seed-demo.ts",
-    "bench:live": "tsx scripts/bench-live.ts"
+    "bench:live": "tsx scripts/bench-live.ts",
+    "test": "tsx --test tests/benchmark.test.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",
