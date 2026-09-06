@@ -44,6 +44,7 @@ export class PanelState {
   items = $state<TranscriptItem[]>([]);
   metrics = $state<RunMetrics>(emptyMetrics());
   finalText = $state<string | null>(null);
+  stateDiff = $state<ChangeRow[] | null>(null);
   runId = $state('');
   /** Review mode: change sets that required a user decision this run. */
   approvalsRequested = $state(0);
@@ -59,6 +60,7 @@ export class PanelState {
     this.items = [];
     this.metrics = emptyMetrics();
     this.finalText = null;
+    this.stateDiff = null;
     this.runId = '';
     this.approvalsRequested = 0;
   }
@@ -121,6 +123,7 @@ export class PanelState {
         break;
       case 'complete':
         this.metrics = ev.metrics;
+        this.stateDiff = ev.stateDiff ?? null;
         this.finalText = ev.finalText;
         this.phase = 'done';
         this.status = 'done';
@@ -145,7 +148,10 @@ export class PanelState {
       review,
       handlers: { onEvent: (ev) => this.handle(ev) }
     });
-    if (this.status === 'running') this.status = 'done';
+    if (this.status === 'running') {
+      this.status = 'error';
+      this.items.push({ kind: 'error', message: 'Stream ended before the run completed.' });
+    }
   }
 
   /** Answer a pending review-mode approval ('all' = approve the rest of the run). */

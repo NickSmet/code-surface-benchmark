@@ -1,105 +1,102 @@
 /**
- * Ground-truth correctness checks for the preset tasks. Pure functions shared
- * by the bench-live harness (node) and the live UI verdicts (browser): given
- * what a run produced (final text + the write set it applied), decide whether
- * it matches the truth computed from the inventory.
+ * Shared benchmark checks. State checks compare exact ids/fields/values.
+ * Free-text answer checks are deliberately labelled heuristics: passing them
+ * is not proof that every statement in the answer is correct.
  */
-
 import type { GroundTruth } from './inventory/truth';
 import type { ChangeRow } from './inventory/projection';
 
 export interface Check {
   label: string;
   pass: boolean;
-  /** What the run actually did — shown alongside failures so a wrong verdict is auditable at a glance. */
   detail?: string;
 }
 
-/** The observable facts of one run that the checks are evaluated against. */
 export interface RunFacts {
   ok: boolean;
   finalText: string;
-  /** field -> number of diff rows writing it (e.g. "tags.env" -> 33). */
-  diffFieldCounts: Record<string, number>;
-  /** VM names with a powerState -> deallocated write. */
-  deallocatedNames: string[];
+  /** Only successfully applied tool diffs; excludes declined/error results. */
+  appliedDiffs: ChangeRow[];
+  /** Independently observed final state versus the starting snapshot. */
+  stateDiff: ChangeRow[] | null;
 }
 
-/** Build RunFacts from raw diff rows (the UI path; bench-live accumulates while streaming). */
-export function factsFromDiffs(ok: boolean, finalText: string, diffs: ChangeRow[]): RunFacts {
-  const diffFieldCounts: Record<string, number> = {};
-  const deallocatedNames: string[] = [];
-  for (const row of diffs) {
-    diffFieldCounts[row.field] = (diffFieldCounts[row.field] ?? 0) + 1;
-    if (row.field === 'powerState' && row.after === 'deallocated' && !deallocatedNames.includes(row.resourceName)) {
-      deallocatedNames.push(row.resourceName);
-    }
-  }
-  return { ok, finalText, diffFieldCounts, deallocatedNames };
+export function factsFromDiffs(ok: boolean, finalText: string, appliedDiffs: ChangeRow[], stateDiff: ChangeRow[] | null): RunFacts {
+  return { ok, finalText, appliedDiffs, stateDiff };
 }
 
-/** Every "1,234.56"-looking number in the text, parsed. */
 export function extractAmounts(text: string): number[] {
-  const out: number[] = [];
-  const re = /(\d{1,3}(?:,\d{3})+|\d+)(\.\d{1,2})?/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const n = Number(m[1].replace(/,/g, '') + (m[2] ?? ''));
-    if (Number.isFinite(n)) out.push(n);
-  }
-  return out;
+  return [...text.matchAll(/-?\d+(?:,\d{3})*(?:\.\d+)?/g)].map((m) => Number(m[0].replace(/,/g, '')));
+}
+
+const cents = (n: number): number => Math.round(n * 100);
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Key and compare every column; row order has no effect on a write set. */
+export function sameChanges(actual: ChangeRow[], expected: ChangeRow[]): boolean {
+  const encode = (row: ChangeRow): string => JSON.stringify([
+    row.resourceId, row.resourceName, row.resourceType, row.field, row.op, row.before, row.after
+  ]);
+  const left = actual.map(encode).sort(), right = expected.map(encode).sort();
+  return left.length === right.length && left.every((value, i) => value === right[i]);
 }
 
 export function checksForTask(taskId: string, truth: GroundTruth, facts: RunFacts): Check[] {
-  const text = facts.finalText.toLowerCase();
-  const checks: Check[] = [{ label: 'completed without error', pass: facts.ok }];
+  const text = facts.finalText.toLowerCase().replace(/[*`_]/g, '');
+  const lines = text.split(/\r?\n/);
+  const checks: Check[] = [
+    { label: 'completed with a final answer', pass: facts.ok && text.trim().length > 0 },
+    { label: 'final estate state was recorded', pass: facts.stateDiff !== null }
+  ];
+  if (taskId === 'bulk-write') {
+    checks.push({
+      label: 'applied exactly the expected resource ids, fields and values, with no extra writes',
+      pass: sameChanges(facts.appliedDiffs, truth.expectedBulkDiff),
+      detail: `${facts.appliedDiffs.length} applied rows; expected ${truth.expectedBulkDiff.length}`
+    });
+    checks.push({
+      label: 'final estate matches the complete expected state change',
+      pass: facts.stateDiff !== null && sameChanges(facts.stateDiff, truth.expectedBulkDiff)
+    });
+    return checks;
+  }
+
+  checks.push({ label: 'read task made no changes', pass: facts.appliedDiffs.length === 0 && facts.stateDiff?.length === 0 });
   if (taskId === 'granular-read') {
-    checks.push({ label: `states public IP ${truth.heroPublicIp}`, pass: facts.finalText.includes(truth.heroPublicIp) });
-    checks.push({ label: `states power state "${truth.heroPowerState}"`, pass: text.includes(truth.heroPowerState) });
+    checks.push({ label: `answer mentions public IP ${truth.heroPublicIp}`, pass: text.includes(truth.heroPublicIp) });
+    checks.push({ label: `answer mentions power state ${truth.heroPowerState}`, pass: new RegExp(`\\b${escapeRegex(truth.heroPowerState)}\\b`).test(text) });
   } else if (taskId === 'filter-aggregate') {
-    const amounts = extractAmounts(facts.finalText);
-    const closest = amounts.length
-      ? amounts.reduce((a, b) => (Math.abs(b - truth.prodRunningTotal) < Math.abs(a - truth.prodRunningTotal) ? b : a))
-      : null;
-    checks.push({
-      label: `states the exact total $${truth.prodRunningTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })} (±$1)`,
-      pass: amounts.some((n) => Math.abs(n - truth.prodRunningTotal) <= 1),
-      detail: closest === null ? 'no dollar amount found in the answer' : `closest stated amount: $${closest.toLocaleString('en-US')}`
+    // Match each label to the numbers after it on the same line, stopping at
+    // the next group/total label. Handles usual bullet lists and Markdown tables.
+    const labels = [...Object.keys(truth.prodRunningByGroup).map(escapeRegex), '\\b(?:grand\\s+)?total\\b'];
+    const segments = (label: string): string[] => lines.flatMap((line) => {
+      const found = new RegExp(label, 'i').exec(line);
+      if (!found) return [];
+      const rest = line.slice(found.index + found[0].length);
+      const next = new RegExp(labels.join('|'), 'i').exec(rest);
+      return [next ? rest.slice(0, next.index) : rest];
     });
+    const hasAmount = (label: string, expected: number): boolean => segments(label).some((s) => extractAmounts(s).some((n) => cents(n) === cents(expected)));
+    checks.push({ label: `answer associates total with $${truth.prodRunningTotal.toFixed(2)} (cent precision)`, pass: hasAmount('\\b(?:grand\\s+)?total\\b', truth.prodRunningTotal) });
+    for (const [group, amount] of Object.entries(truth.prodRunningByGroup)) {
+      checks.push({ label: `answer associates ${group} with $${amount.toFixed(2)}`, pass: hasAmount(escapeRegex(group), amount) });
+    }
+    const untaggedLines = lines.filter((line) => /untagged|no tags|without tags|have tags|tagged/.test(line));
+    const none = untaggedLines.some((line) =>
+      /(?:untagged|without tags|no tags).*\b(?:none|no|0|zero)\b|\b(?:none|no|0|zero)\b.*(?:untagged|without tags|no tags)|\ball\b.*(?:tagged|have tags)/.test(line)
+    );
     checks.push({
-      label: 'breaks down by resource group',
-      pass: truth.prodGroups.some((g) => text.includes(g.toLowerCase()))
-    });
-  } else if (taskId === 'bulk-write') {
-    checks.push({
-      label: `writes tags.env on all ${truth.untaggedStagingCount} untagged resources`,
-      pass: (facts.diffFieldCounts['tags.env'] ?? 0) === truth.untaggedStagingCount,
-      detail: `wrote ${facts.diffFieldCounts['tags.env'] ?? 0}`
-    });
-    checks.push({
-      label: `writes tags.owner on all ${truth.untaggedStagingCount} untagged resources`,
-      pass: (facts.diffFieldCounts['tags.owner'] ?? 0) === truth.untaggedStagingCount,
-      detail: `wrote ${facts.diffFieldCounts['tags.owner'] ?? 0}`
-    });
-    checks.push({
-      label: `deallocates exactly [${truth.expectedDeallocNames.join(', ')}] (the VMs idle >30 days estate-wide)`,
-      pass:
-        facts.deallocatedNames.length === truth.expectedDeallocNames.length &&
-        [...facts.deallocatedNames].sort().every((n, i) => n === truth.expectedDeallocNames[i]),
-      detail:
-        facts.deallocatedNames.length === 0
-          ? 'deallocated none'
-          : `deallocated [${[...facts.deallocatedNames].sort().join(', ')}]`
+      label: truth.prodUntaggedRunningNames.length ? 'answer lists every untagged running production VM' : 'answer explicitly reports no untagged running production VMs',
+      pass: truth.prodUntaggedRunningNames.length
+        ? truth.prodUntaggedRunningNames.every((name) => untaggedLines.some((line) => line.includes(name.toLowerCase())))
+        : none
     });
   } else if (taskId === 'single-lookup') {
-    checks.push({
-      label: `states count ${truth.prodGroupCount}`,
-      pass: new RegExp(`\\b${truth.prodGroupCount}\\b`).test(facts.finalText)
-    });
-    checks.push({
-      label: 'names a Production resource group',
-      pass: truth.prodGroups.some((g) => text.includes(g.toLowerCase()))
-    });
+    const count = String(truth.prodGroupCount);
+    checks.push({ label: `answer states resource-group count ${count}`, pass: new RegExp(`\\b${count}\\s+resource\\s+groups?\\b|\\b(?:count|resource\\s+groups?)\\s*[:=]\\s*${count}\\b`).test(text) });
+    for (const group of truth.prodGroups) checks.push({ label: `answer names ${group}`, pass: text.includes(group.toLowerCase()) });
+  } else {
+    checks.push({ label: 'task has a configured checker', pass: false });
   }
   return checks;
 }

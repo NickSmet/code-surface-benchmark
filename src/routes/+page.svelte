@@ -117,8 +117,8 @@
   // ── Ground-truth verdicts (same checks the bench harness runs) ──────────
   function verdictFor(panel: PanelState, taskId: string, truth: GroundTruth): Verdict {
     if (panel.status === 'running' || panel.status === 'idle') return { state: 'pending', failures: [] };
-    const diffs = panel.items.flatMap((i) => (i.kind === 'tool' ? (i.diff ?? []) : []));
-    const facts = factsFromDiffs(panel.status === 'done', panel.finalText ?? '', diffs);
+    const diffs = panel.items.flatMap((i) => (i.kind === 'tool' && i.done && !i.error && i.approval !== 'declined' ? (i.diff ?? []) : []));
+    const facts = factsFromDiffs(panel.status === 'done', panel.finalText ?? '', diffs, panel.stateDiff);
     const failures = checksForTask(taskId, truth, facts)
       .filter((c) => !c.pass)
       .map((c) => (c.detail ? `${c.label} — ${c.detail}` : c.label));

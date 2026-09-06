@@ -1,8 +1,7 @@
 /**
  * The shared agent loop. IDENTICAL for both surfaces — only the injected
- * `Surface` (system prompt + tools + dispatch) differs. That's the whole
- * point: same model, same task, same harness, so any difference in tokens,
- * round trips, latency, and cost is attributable to the surface alone.
+ * `Surface` (system prompt + tools + dispatch) differs. This compares two
+ * interface packages; it does not isolate each feature's causal effect.
  *
  * Token accounting note: we SUM `usage.promptTokens` across every round trip,
  * and price each turn with its cached-token split. Each turn re-sends the
@@ -14,12 +13,11 @@
 import type { ProviderClient, ProviderMessage } from './providers/types';
 import { costUsd, priceFor } from './pricing';
 import { emptyMetrics, type ApprovalDecision, type BenchEvent, type RunMetrics, type SurfaceId } from './sse-protocol';
-import type { ChangeRow } from '$lib/inventory/projection';
+import { diffProjection, type ChangeRow } from '$lib/inventory/projection';
 import type { Surface } from '$lib/surfaces/types';
 import { previewArgs } from '$lib/surfaces/types';
 
 const MAX_ITERATIONS = 16;
-const MAX_TOOL_RESULT_CHARS = 24_000;
 
 export interface RunBenchArgs {
   provider: ProviderClient;
@@ -32,7 +30,7 @@ export interface RunBenchArgs {
   /**
    * Review mode: called whenever a tool call yields a proposed change set;
    * the loop pauses (like an MCP elicitation) until the user decides. Wait
-   * time is excluded from elapsedMs so latency stays model-only.
+   * time is excluded from elapsedMs; model calls and local execution remain.
    */
   reviewGate?: (seq: number, name: string, diff: ChangeRow[]) => Promise<ApprovalDecision>;
 }
@@ -50,16 +48,13 @@ function parseArgs(raw: string): Record<string, unknown> {
   }
 }
 
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : s.slice(0, max) + `\n/* …truncated (was ${s.length} chars) */`;
-}
-
 export async function* runBench(args: RunBenchArgs): AsyncGenerator<BenchEvent, void, unknown> {
   const { provider, surface, task, env, abortSignal, runId, reviewGate } = args;
   const start = Date.now();
   let pausedMs = 0;
   const at = (): number => Date.now() - start - pausedMs;
   const price = priceFor(provider.model, env);
+  const initial = surface.snapshot();
 
   const toolSchemaTokens = estTokens(JSON.stringify(surface.tools));
   const metrics: RunMetrics = emptyMetrics(toolSchemaTokens);
@@ -78,7 +73,8 @@ export async function* runBench(args: RunBenchArgs): AsyncGenerator<BenchEvent, 
     model: provider.model,
     isStub: provider.isStub,
     metrics,
-    runId
+    runId,
+    configuration: { systemPrompt: surface.systemPrompt, tools: surface.tools, prices: price, maxIterations: MAX_ITERATIONS, resultPolicy: 'complete' }
   };
   yield { type: 'phase', at: at(), phase: 'thinking' };
 
@@ -103,14 +99,14 @@ export async function* runBench(args: RunBenchArgs): AsyncGenerator<BenchEvent, 
     metrics.completionTokens += turn.usage.completionTokens;
     metrics.costUsd += costUsd(turn.usage, price);
     settle();
-    yield { type: 'turn', at: at(), metrics: { ...metrics } };
+    yield { type: 'turn', at: at(), metrics: { ...metrics }, content: turn.content, toolCalls: turn.toolCalls, usage: turn.usage };
 
     // No tool calls → final answer, end the run.
     if (turn.toolCalls.length === 0) {
       const finalText = (turn.content ?? '').trim();
       if (finalText) yield { type: 'assistant', at: at(), text: finalText };
       yield { type: 'phase', at: at(), phase: 'done' };
-      yield { type: 'complete', at: at(), metrics: { ...metrics }, finalText: finalText || null };
+      yield { type: 'complete', at: at(), metrics: { ...metrics }, finalText: finalText || null, stateDiff: diffProjection(initial, surface.snapshot()) };
       return;
     }
 
@@ -152,7 +148,7 @@ export async function* runBench(args: RunBenchArgs): AsyncGenerator<BenchEvent, 
       // gate once per write call, the code surface once per run, and that
       // asymmetry is the point. Approved (or ungated) diffs apply immediately.
       let approval: ApprovalDecision | undefined;
-      if (result.diff && result.diff.length > 0) {
+      if (!result.error && result.diff && result.diff.length > 0) {
         if (reviewGate) {
           yield { type: 'approval_request', at: at(), seq, name: tc.function.name, diff: result.diff };
           const pauseStart = Date.now();
@@ -167,10 +163,17 @@ export async function* runBench(args: RunBenchArgs): AsyncGenerator<BenchEvent, 
             resultPreview: `declined by reviewer (${result.diff.length} field changes)`
           };
         } else {
-          surface.applyDiff(result.diff);
+          try {
+            surface.applyDiff(result.diff);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            result = { ...result, error: true, content: JSON.stringify({ error: message, status: 'not_applied' }), resultPreview: message };
+          }
         }
       }
-      const resultContent = truncate(result.content, MAX_TOOL_RESULT_CHARS);
+      // This fixture is bounded. Preserve complete results for both surfaces;
+      // silently cutting JSON can hide task targets from the catalog agent.
+      const resultContent = result.content;
 
       yield {
         type: 'tool_result',
@@ -196,5 +199,5 @@ export async function* runBench(args: RunBenchArgs): AsyncGenerator<BenchEvent, 
 
   // Iteration cap hit without the model ending its turn.
   settle();
-  yield { type: 'complete', at: at(), metrics: { ...metrics }, finalText: null };
+  yield { type: 'error', at: at(), metrics: { ...metrics }, message: `Model did not finish within ${MAX_ITERATIONS} turns` };
 }

@@ -8,6 +8,8 @@
 
 import type { ChangeRow } from '$lib/inventory/projection';
 import type { ToolTrace } from '$lib/surfaces/types';
+import type { ProviderToolCall, ToolSchema, Usage } from './providers/types';
+import type { PriceBook } from './pricing';
 
 export type SurfaceId = 'catalog' | 'code';
 
@@ -54,6 +56,8 @@ export type BenchEvent =
       metrics: RunMetrics;
       /** Server-side run handle — used to answer approval requests in review mode. */
       runId?: string;
+      /** Public benchmark configuration, never credentials. Not sent to the model. */
+      configuration?: { systemPrompt: string; tools: ToolSchema[]; prices: PriceBook; maxIterations: number; resultPolicy: 'complete' };
     }
   | { type: 'phase'; at: number; phase: 'thinking' | 'calling' | 'done' }
   | { type: 'tool_call'; at: number; seq: number; name: string; argsPreview: string; args?: Record<string, unknown>; code?: string }
@@ -78,7 +82,7 @@ export type BenchEvent =
       /** Set in review mode when this call carried a change set. */
       approval?: ApprovalDecision;
     }
-  | { type: 'turn'; at: number; metrics: RunMetrics }
+  | { type: 'turn'; at: number; metrics: RunMetrics; content?: string; toolCalls?: ProviderToolCall[]; usage?: Usage }
   | { type: 'assistant'; at: number; text: string }
-  | { type: 'complete'; at: number; metrics: RunMetrics; finalText: string | null }
+  | { type: 'complete'; at: number; metrics: RunMetrics; finalText: string | null; stateDiff: ChangeRow[] }
   | { type: 'error'; at: number; message: string; metrics: RunMetrics };

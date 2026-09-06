@@ -1,10 +1,11 @@
 /**
  * A Surface is everything that differs between the two agents: the system
  * prompt, the tool schemas the model sees, and how a tool call is executed.
- * The loop is identical for both — that's what makes the benchmark fair.
+ * The shared loop controls some variables; the two surfaces still bundle
+ * different prompts, data access, computation and write granularity.
  */
 
-import type { ChangeRow } from '$lib/inventory/projection';
+import type { ChangeRow, ProjectionView } from '$lib/inventory/projection';
 import type { ToolSchema } from '$lib/agent/providers/types';
 
 export type ToolTraceMode = 'read' | 'write' | 'projection' | 'scope';
@@ -43,6 +44,8 @@ export interface Surface {
   label: string;
   systemPrompt: string;
   tools: ToolSchema[];
+  /** Actual run state, used for checks outside the model's context. */
+  snapshot(): ProjectionView;
   /** Execute a single tool call against the run's estate copy. */
   dispatch(toolName: string, args: Record<string, unknown>): Promise<ToolDispatchResult>;
   /**

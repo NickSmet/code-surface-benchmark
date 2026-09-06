@@ -13,31 +13,34 @@
  * computed directly from the mock inventory:
  *
  *   - granular read: the exact power state and public IP
- *   - filter + aggregate: the exact grand total (any $-amount within ±$1)
+ *   - filter + aggregate: cent-precision totals by label, plus the untagged answer
  *   - bulk write: the full expected write set (every untagged resource
  *     tagged, and the exact set of idle VMs deallocated)
- *   - single lookup: the exact count and group names
+ *   - single lookup: the count and all group names
+ * Text checks are heuristics. State checks compare full change rows and
+ * independently observed final state. See README for scoring limitations.
  *
  * Correctness is a measured outcome, not a gate: a surface can complete a
  * run and still be marked incorrect. The process exits non-zero only when
  * runs fail to complete (transport/model errors).
  *
- * Prints a comparison table and writes docs/live-results.{md,json} for the
+ * Prints a comparison table and writes timestamped docs/runs/ artifacts for the
  * README / talk appendix. With BENCH_RUNS>1 the tables report the median
  * [min–max] across iterations per surface.
  *
  * Runs sequentially (not in parallel) so latency numbers aren't muddied by
  * the two surfaces contending for the same model TPM quota. Each run gets a
- * fresh cache-busting nonce server-side, so every iteration is cold-cache
- * comparable (see README "What's measured").
+ * fresh prefix nonce server-side to discourage cross-run cache reuse; actual
+ * cached-token counts are recorded rather than assuming a cache miss.
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { buildInventory } from '../src/lib/inventory/fixtures/builders';
 import { computeGroundTruth } from '../src/lib/inventory/truth';
-import { checksForTask, type Check } from '../src/lib/bench-checks';
+import { checksForTask, factsFromDiffs, type Check } from '../src/lib/bench-checks';
 import { TASKS } from '../src/lib/tasks';
 import type { BenchEvent, RunMetrics } from '../src/lib/agent/sse-protocol';
 import type { ChangeRow } from '../src/lib/inventory/projection';
@@ -65,6 +68,9 @@ interface RunResult {
   diffFieldCounts: Record<string, number>;
   diffResourceNames: string[];
   deallocatedNames: string[];
+  appliedDiffs: ChangeRow[];
+  stateDiff: ChangeRow[] | null;
+  events: BenchEvent[];
 }
 
 function emptyRunResult(surface: SurfaceId, model = '?'): RunResult {
@@ -89,7 +95,10 @@ function emptyRunResult(surface: SurfaceId, model = '?'): RunResult {
     diffRows: 0,
     diffFieldCounts: {},
     diffResourceNames: [],
-    deallocatedNames: []
+    deallocatedNames: [],
+    appliedDiffs: [],
+    stateDiff: null,
+    events: []
   };
 }
 
@@ -136,6 +145,7 @@ async function runOne(surface: SurfaceId, prompt: string): Promise<RunResult> {
   const out = emptyRunResult(surface);
 
   const handle = (ev: BenchEvent): void => {
+    out.events.push(ev);
     switch (ev.type) {
       case 'meta':
         out.isStub = ev.isStub;
@@ -150,8 +160,9 @@ async function runOne(surface: SurfaceId, prompt: string): Promise<RunResult> {
         out.toolNames.push(ev.name);
         break;
       case 'tool_result':
-        if (ev.diff) {
+        if (ev.diff && !ev.error && ev.approval !== 'declined') {
           const rows = ev.diff as ChangeRow[];
+          out.appliedDiffs.push(...rows);
           out.diffRows += rows.length;
           for (const row of rows) {
             out.diffFieldCounts[row.field] = (out.diffFieldCounts[row.field] ?? 0) + 1;
@@ -166,6 +177,7 @@ async function runOne(surface: SurfaceId, prompt: string): Promise<RunResult> {
     if (ev.type === 'complete') {
       out.ok = true;
       out.finalText = ev.finalText ?? '';
+      out.stateDiff = ev.stateDiff ?? null;
     }
     if (ev.type === 'error') {
       out.ok = false;
@@ -183,6 +195,9 @@ async function runOne(surface: SurfaceId, prompt: string): Promise<RunResult> {
       buf = rest;
       for (const ev of events) handle(ev);
     }
+  } catch (err) {
+    out.ok = false;
+    out.errorMessage = err instanceof Error ? err.message : String(err);
   } finally {
     clearTimeout(timer);
   }
@@ -191,12 +206,7 @@ async function runOne(surface: SurfaceId, prompt: string): Promise<RunResult> {
 
 // ── Per-task correctness checks (shared with the UI, see src/lib/bench-checks) ──
 function checksFor(taskId: string, r: RunResult): Check[] {
-  return checksForTask(taskId, truth, {
-    ok: r.ok && !r.errorMessage,
-    finalText: r.finalText,
-    diffFieldCounts: r.diffFieldCounts,
-    deallocatedNames: r.deallocatedNames
-  });
+  return checksForTask(taskId, truth, factsFromDiffs(r.ok && !r.errorMessage, r.finalText, r.appliedDiffs, r.stateDiff));
 }
 
 // ── Run the matrix ─────────────────────────────────────────────────────────
@@ -217,6 +227,7 @@ const range = (xs: number[], fmt: (n: number) => string): string => {
 interface TaskRuns {
   taskId: string;
   task: string;
+  prompt: string;
   expect: string;
   perSurface: Record<SurfaceId, Array<{ result: RunResult; checks: Check[] }>>;
 }
@@ -233,17 +244,18 @@ async function main(): Promise<void> {
     provider: { isStub: boolean; model: string; label: string };
   };
   console.log(`provider: ${info.provider.label} (stub=${info.provider.isStub})\n`);
-  if (info.provider.isStub)
-    console.warn('WARNING: server is on the STUB provider — numbers below are not from a live model.\n');
+  if (info.provider.isStub) throw new Error('bench:live requires a live provider. The offline stub is for UI demonstrations, not measurements.');
 
   const taskRuns: TaskRuns[] = TASKS.map((t) => ({
     taskId: t.id,
     task: t.label,
+    prompt: t.prompt,
     expect: t.expect,
     perSurface: { catalog: [], code: [] }
   }));
 
   let transportFailures = 0;
+  const discardedAttempts: Array<{ taskId: string; surface: SurfaceId; attempt: number; result: RunResult }> = [];
 
   for (let run = 1; run <= RUNS; run++) {
     if (RUNS > 1) console.log(`── run ${run}/${RUNS} ──`);
@@ -267,6 +279,7 @@ async function main(): Promise<void> {
             result.errorMessage = err instanceof Error ? err.message : String(err);
           }
           if (!isRateLimited(result) || attempt >= 2) break;
+          discardedAttempts.push({ taskId: task.id, surface, attempt: attempt + 1, result });
           process.stdout.write(`   rate-limited — waiting 60s, retry ${attempt + 1}/2 … `);
           await sleep(60_000);
           process.stdout.write(`\n   ${surface} (retry) … `);
@@ -287,11 +300,11 @@ async function main(): Promise<void> {
   );
   mdLines.push('');
   mdLines.push(
-    'Each run is cold-cache (a per-run nonce busts the provider prompt cache), and each answer is checked against ground truth computed from the inventory. "Correct" means every check passed, including exact totals and complete write sets.'
+    'A unique prompt prefix discourages cross-run cache reuse; recorded cached-token counts are authoritative. Checks combine heuristic text matching with exact applied-write and final-state comparisons. Passing text checks does not prove every statement correct. Costs are estimates from recorded token usage and configured prices. Protocol version 2: complete tool results, revised prompts and stricter checks; do not reuse historical ratios.'
   );
   mdLines.push('');
   mdLines.push(
-    `| Task | Surface | Correct | Round trips | Tool calls | Total tok${RUNS > 1 ? ' (median [range])' : ''} | Cost | Latency |`
+    `| Task | Surface | Checks passed | Model turns | Tool calls | Total tok${RUNS > 1 ? ' (median [range])' : ''} | Estimated cost | Elapsed |`
   );
   mdLines.push('|---|---|---|--:|--:|--:|--:|--:|');
 
@@ -326,7 +339,7 @@ async function main(): Promise<void> {
       const runs = row.perSurface[s];
       const correctRuns = runs.filter((r) => r.checks.every((c) => c.pass)).length;
       console.log(
-        `   ${s}: correct ${correctRuns}/${RUNS} | median ${med[s].turns} turns, ${Math.round(med[s].tok)} tok, ${fmtUsd(med[s].cost)}, ${(med[s].ms / 1000).toFixed(1)}s`
+        `   ${s}: checks passed ${correctRuns}/${RUNS} | median ${med[s].turns} turns, ${Math.round(med[s].tok)} tok, ${fmtUsd(med[s].cost)}, ${(med[s].ms / 1000).toFixed(1)}s`
       );
       for (const [runIdx, r] of runs.entries()) {
         for (const chk of r.checks) {
@@ -344,7 +357,7 @@ async function main(): Promise<void> {
     mdLines.push('');
     mdLines.push('## Per-run detail');
     mdLines.push('');
-    mdLines.push('| Task | Surface | Run | Correct | Round trips | Tool calls | Prompt tok | Cached | Completion | Total | Cost | Latency |');
+    mdLines.push('| Task | Surface | Run | Checks passed | Model turns | Tool calls | Prompt tok | Cached | Completion | Total | Estimated cost | Elapsed |');
     mdLines.push('|---|---|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|');
     for (const row of taskRuns) {
       for (const s of SURFACES) {
@@ -361,18 +374,28 @@ async function main(): Promise<void> {
 
   // Write artifacts for the README / talk appendix.
   const here = dirname(fileURLToPath(import.meta.url));
-  const docs = resolve(here, '..', 'docs');
+  const generatedAt = new Date().toISOString();
+  const outputRoot = process.env.BENCH_OUTPUT_DIR ?? resolve(here, '..', 'docs', 'runs');
+  const docs = resolve(outputRoot, generatedAt.replace(/[:.]/g, '-'));
   mkdirSync(docs, { recursive: true });
+  let harnessRevision: { commit: string; trackedChanges: boolean } | null = null;
+  try {
+    const cwd = resolve(here, '..');
+    harnessRevision = {
+      commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8' }).trim(),
+      trackedChanges: execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd, encoding: 'utf8' }).trim().length > 0
+    };
+  } catch { /* Git metadata is optional for downloaded archives. */ }
   writeFileSync(resolve(docs, 'live-results.md'), mdLines.join('\n') + '\n');
   writeFileSync(
     resolve(docs, 'live-results.json'),
     JSON.stringify(
-      { base: BASE, provider: info.provider, runs: RUNS, truth, generatedAt: new Date().toISOString(), tasks: taskRuns },
+      { protocolVersion: 2, base: BASE, harnessRevision, provider: info.provider, runs: RUNS, truth, generatedAt, tasks: taskRuns, discardedAttempts },
       null,
       2
     ) + '\n'
   );
-  console.log(`\nwrote docs/live-results.md and docs/live-results.json`);
+  console.log(`\nwrote ${docs}/live-results.md and live-results.json (including full run events)`);
 
   const allCorrect = taskRuns.every((row) => SURFACES.every((s) => row.perSurface[s].every((r) => r.checks.every((c) => c.pass))));
   console.log(

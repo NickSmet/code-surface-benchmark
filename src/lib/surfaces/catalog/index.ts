@@ -1,5 +1,6 @@
 import { createRunInventory } from '$lib/inventory/store';
 import { applyChangeRows } from '$lib/inventory/apply';
+import { buildProjection } from '$lib/inventory/projection';
 import { traceDiffResources, traceResource, traceResources } from '$lib/inventory/overview';
 import type { Inventory } from '$lib/inventory/types';
 import type { Surface, ToolDispatchResult } from '$lib/surfaces/types';
@@ -54,6 +55,7 @@ export function createCatalogSurface(runNonce?: string, inv: Inventory = createR
     label: 'Tool Catalog',
     systemPrompt: catalogSystemPrompt(inv.generatedAt, runNonce),
     tools: CATALOG_TOOLS,
+    snapshot: () => buildProjection(inv),
     applyDiff: (rows) => applyChangeRows(inv, rows),
     async dispatch(name, args): Promise<ToolDispatchResult> {
       switch (name) {

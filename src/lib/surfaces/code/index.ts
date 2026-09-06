@@ -15,6 +15,7 @@ export function createCodeSurface(runNonce?: string, inv: Inventory = createRunI
     label: 'Code Surface',
     systemPrompt: codeSystemPrompt(inv.generatedAt, runNonce),
     tools: CODE_TOOLS,
+    snapshot: () => buildProjection(inv),
     applyDiff: (rows) => applyChangeRows(inv, rows),
     async dispatch(name, args): Promise<ToolDispatchResult> {
       if (name !== OPERATE_NAME) {
