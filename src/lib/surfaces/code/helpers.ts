@@ -25,7 +25,7 @@ export function makeCtx(data: ProjectionView): Record<string, unknown> {
     preview,
     /** Snapshot time as ISO. Reason about age/idleness relative to this. */
     now: () => data.generatedAt,
-    /** Whole days between an ISO timestamp and the snapshot time. */
+    /** Elapsed days between an ISO timestamp and the snapshot time. */
     daysSince: (iso: string) => (now - new Date(iso).getTime()) / 86_400_000
   };
 }
@@ -57,12 +57,8 @@ export const SCHEMA_DOC = `
 //   sqlDatabase:      dbTier, maxSizeGb, dbStatus('Online'|'Paused')
 //   appService:       runtime, appSku, httpsOnly, appState('Running'|'Stopped')
 //
-// References are by id. To get a VM's public IP, follow vm.nicId -> nic.publicIpId -> publicIp.ipAddress:
-//   const byId = new Map(data.resources.map(r => [r.id, r]));
-//   const vm  = data.resources.find(r => r.name === 'web-prod-03');
-//   const nic = byId.get(vm.nicId);
-//   const pip = nic && nic.publicIpId ? byId.get(nic.publicIpId) : null;
-//   return { powerState: vm.powerState, publicIp: pip ? pip.ipAddress : null };
+// References are by id: a VM's nicId identifies a networkInterface, whose
+// publicIpId identifies a publicIp resource. Null means no linked public IP.
 //
 // operate_inventory contract:
 // - Define function main(data, ctx).
@@ -79,14 +75,14 @@ export const SCHEMA_DOC = `
 //
 // Read example:
 //   function main(data) {
-//     return data.resources.filter(r => r.type === 'virtualMachine' && r.powerState === 'running').length;
+//     return data.resources.filter(r => r.type === 'storageAccount' && r.httpsOnly).length;
 //   }
 //
 // Write example:
 //   function main(data) {
 //     for (const r of data.resources) {
-//       if (r.resourceGroup === 'app-staging' && Object.keys(r.tags).length === 0) {
-//         r.tags.env = 'staging'; r.tags.owner = 'app-team';
+//       if (r.resourceGroup === 'example-group' && Object.keys(r.tags).length === 0) {
+//         r.tags.reviewed = 'yes';
 //       }
 //     }
 //   }

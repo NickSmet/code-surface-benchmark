@@ -8,7 +8,7 @@ export function codeSystemPrompt(snapshotIso: string, runNonce?: string): string
     'The full data shape is in the tool description.',
     '',
     `The estate snapshot was taken at ${snapshotIso}. Reason about "idle"/"stale"/"age" relative to it`,
-    '(ctx.now() returns it; ctx.daysSince(iso) returns whole days).',
+    '(ctx.now() returns it; ctx.daysSince(iso) returns elapsed days).',
     '',
     'Use operate_inventory for both reads and writes. Return exactly what you need to answer read',
     'questions. To make changes, mutate data in place; the runtime derives the change set (a diff) from',
