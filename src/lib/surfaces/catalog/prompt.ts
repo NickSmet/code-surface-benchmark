@@ -1,7 +1,7 @@
 /**
  * `runNonce` is a per-run cache-busting marker. Provider-side prompt caches
- * key on prompt prefixes; a unique first line guarantees every benchmark run
- * starts cold, so cost/latency numbers are comparable across runs. Within a
+ * use prompt prefixes; a unique first line discourages cross-run reuse.
+ * Recorded usage, not the nonce, establishes which tokens were cached. Within a
  * run the prompt stays constant, so intra-run caching (part of the real cost
  * shape of multi-turn loops) still applies.
  */

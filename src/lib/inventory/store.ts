@@ -4,8 +4,8 @@
  * The canonical inventory is a single in-memory copy per server process,
  * seeded deterministically from the builder on first access. It is never
  * mutated: every benchmark run operates on its own copy of the estate
- * (`createRunInventory`), so writes genuinely apply — the tool calls have
- * real effects, like production MCP tools — while runs stay reproducible
+ * (`createRunInventory`), so supported writes update that
+ * mock copy while runs stay reproducible
  * and concurrent panels can't corrupt each other's state.
  */
 

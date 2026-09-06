@@ -7,8 +7,8 @@
  * Streams a sequence of BenchEvent frames; the panel forwards each to its
  * live transcript + metrics. Both surfaces hit the same provider/model.
  *
- * Every run operates on its own copy of the estate, so writes really apply
- * (like production MCP tools) without concurrent runs corrupting each other.
+ * Every run operates on its own mock copy of the estate; supported writes
+ * apply to that copy without changing another run.
  * With `review: true`, every change set pauses the run until the user answers
  * via POST /backend/bench/approve (elicitation-style gating); approved sets
  * are then applied. Without review, writes apply as the calls return.
@@ -45,8 +45,8 @@ export const POST: RequestHandler = async ({ request, params }) => {
   const review = body?.review === true;
 
   const provider = selectProvider(env as Record<string, string | undefined>);
-  // Per-run cache-busting nonce: unique per POST so every run starts with a
-  // cold provider prompt cache, constant within the run's turns. Deliberately
+  // Per-run prefix nonce discourages cross-run cache reuse; actual cache
+  // use is recorded from provider usage. Constant within each run. Deliberately
   // opaque (not a timestamp) so it can't leak a competing "now" into the
   // prompt — the snapshot time must stay the only clock the model sees.
   const runNonce = crypto.randomUUID().slice(0, 8);

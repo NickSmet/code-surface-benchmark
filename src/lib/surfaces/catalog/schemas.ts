@@ -1,7 +1,7 @@
 /**
  * The tool catalogue: a fan of granular, single-purpose tools — the
- * conventional MCP shape. Every tool's description sits in the context
- * window before the agent does anything, and every action is a round trip.
+ * catalog shape used in this experiment. All descriptions are supplied
+ * up front. Multiple independent calls can share one model turn.
  */
 
 import type { ToolSchema } from '$lib/agent/providers/types';

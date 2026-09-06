@@ -1,17 +1,7 @@
 /**
- * Mock Azure-style cloud inventory.
- *
- * Deliberately verbose and cross-referenced — the kind of "wide, stateful,
- * transformation-heavy" system the talk argues is a poor fit for a tool
- * catalogue. A VM points at a NIC, the NIC points at a public IP, disks
- * point back at the VM. Answering "what's the public IP of web-prod-03"
- * means following two hops; a catalogue pays a round trip per hop, the
- * code surface does it in one pass.
- *
- * Every resource also carries two internal fields (`_internalId`,
- * `_billingAccount`) that the code-surface PROJECTION strips out — the
- * agent literally cannot read or write what it never sees. That's the
- * "safety by construction" beat.
+ * Deterministic mock cloud inventory with VM -> NIC -> public IP references.
+ * Both surfaces expose an allowlisted projection. The write path separately
+ * validates supported mutations; the demo's node:vm is not a security boundary.
  */
 
 export type ResourceType =

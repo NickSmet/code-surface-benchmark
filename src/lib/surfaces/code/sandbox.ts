@@ -1,10 +1,10 @@
 /**
- * Node VM sandbox that runs the agent's `function main(data, ctx)` against a
- * plain-data projection of the inventory.
- *
- * `data` is a projection clone — for reads we discard mutations; for writes
- * the caller diffs the mutated clone against the original to derive the
- * change set that gets applied.
+ * Lightweight demo executor using node:vm, NOT a security sandbox.
+ * Generated code can escape this context and access the host process.
+ * Use only for local experiments with trusted inputs; do not expose this
+ * server to untrusted users. Production needs an isolated runtime with
+ * restricted host capabilities, resource limits and separate credentials.
+ * See README and https://nodejs.org/api/vm.html#vm-executing-javascript.
  */
 
 import vm from 'node:vm';

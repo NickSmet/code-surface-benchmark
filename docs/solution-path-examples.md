@@ -2,8 +2,10 @@
 
 This document shows how the same agent task tends to unfold against the two benchmark surfaces:
 
-- The catalog surface exposes granular MCP tools such as `get_resource`, `list_resources`, `update_resource_tags`, and `set_power_state`.
+- The catalog surface exposes granular functions shaped like MCP tools, such as `get_resource`, `list_resources`, `update_resource_tags`, and `set_power_state`.
 - The code surface exposes one tool, `operate_inventory`, which runs JavaScript against a projected inventory object. Returned values answer read questions. Mutations become a reviewable diff. The canonical inventory is not changed.
+
+The executor uses `node:vm` for local demonstration, not secure isolation. Only tags and VM power state are writable; unsupported edits are rejected. See the [README security and scope notes](../README.md). These examples show mock state changes, not transactional cloud operations.
 
 The paths below are representative, not guaranteed transcripts. A live model may choose a slightly different order, especially on the catalog surface. The point is to make the logical work visible.
 
@@ -369,21 +371,21 @@ This is the counter-case the article should keep. A projected object surface is 
 
 ## What These Examples Show
 
-The difference is not that one side is "tools" and the other side is "no tools." Both are MCP tools. The difference is the unit of work the tool exposes.
+The difference is not that one side is "tools" and the other side is "no tools." Both are in-process function-tool surfaces; either could be exposed over MCP. This repository does not measure MCP transport. The difference is the unit of work the function exposes.
 
 The catalog says:
 
-- Here are the safe operations.
-- Call one operation at a time.
+- Here are the supported operations.
+- Express each operation as a tool call; independent calls can share a model turn.
 - The transcript becomes the working memory between operations.
 - Writes are naturally reviewable because every write is its own tool call.
 
 The code surface says:
 
-- Here is a safe projection of the system.
+- Here is an allowlisted projection with a validated write contract.
 - Read and transform it with ordinary code.
 - Return values for read answers.
 - Mutate the projection to write.
 - Let the runtime derive the change set that actually gets applied.
 
-That changes the cost profile. Multi-hop reads and bulk transformations stop being long chains of small calls. The tradeoff is that the projected object and sandbox become real API design work: the shape must be understandable, safe, stable enough for agents to use, and strict enough that diffs mean what reviewers think they mean.
+That can change the model-token cost profile. The code runtime handles intermediate computation and data movement, returning only selected results. Multi-hop reads and bulk transformations can use fewer model turns or smaller payloads; tool calls and model turns are distinct. The tradeoff is that the projected object and sandbox become real API design work: the shape must be understandable, stable enough for agents to use, and strict enough that diffs mean what reviewers think they mean.
