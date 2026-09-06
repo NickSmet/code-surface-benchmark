@@ -1,7 +1,6 @@
 /**
  * In-process implementations of the catalogue's granular tools, over the
- * run's copy of the estate. A faithful, *well-designed* catalogue — not a
- * strawman: `list_*` return compact summaries, `get_resource` returns full
+ * run's copy of the estate. A deliberately simple catalogue: `list_*` return compact summaries, `get_resource` returns full
  * detail, writes are single-resource. The cost falls out of the shape:
  * multi-hop reads need several `get_resource` round trips, and bulk writes
  * need one call per resource.
@@ -12,7 +11,8 @@
  */
 
 import type { ChangeRow } from '$lib/inventory/projection';
-import { INTERNAL_KEYS, type Inventory, type Resource, type VirtualMachine } from '$lib/inventory/types';
+import { type Inventory, type Resource, type VirtualMachine } from '$lib/inventory/types';
+import { projectResource } from '$lib/inventory/projection';
 
 function subNameById(inv: Inventory, id: string): string {
   return inv.subscriptions.find((s) => s.id === id)?.name ?? id;
@@ -23,9 +23,7 @@ function subIdByName(inv: Inventory, name: string): string | null {
 }
 
 function stripInternal(r: Resource): Record<string, unknown> {
-  const copy: Record<string, unknown> = { ...r };
-  for (const k of INTERNAL_KEYS) delete copy[k];
-  return copy;
+  return projectResource(r) as unknown as Record<string, unknown>;
 }
 
 export interface ResourceSummary {

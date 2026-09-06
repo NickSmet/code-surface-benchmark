@@ -1,7 +1,7 @@
 import { createRunInventory } from '$lib/inventory/store';
 import { applyChangeRows } from '$lib/inventory/apply';
 import { traceDiffResources, traceResources } from '$lib/inventory/overview';
-import { buildProjection, diffProjection } from '$lib/inventory/projection';
+import { buildProjection, diffProjection, type ChangeRow } from '$lib/inventory/projection';
 import type { Inventory } from '$lib/inventory/types';
 import type { Surface, ToolDispatchResult } from '$lib/surfaces/types';
 import { CODE_TOOLS, OPERATE_NAME } from './schemas';
@@ -30,16 +30,17 @@ export function createCodeSurface(runNonce?: string, inv: Inventory = createRunI
       const after = buildProjection(inv);
       let result: unknown;
       let logs: string[];
+      let diff: ChangeRow[];
       try {
         const executed = executeInventoryCode(code, after, makeCtx(after));
         result = executed.result;
         logs = executed.logs;
+        diff = diffProjection(before, after);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { content: JSON.stringify({ error: message }), resultPreview: message, error: true, code };
       }
 
-      const diff = diffProjection(before, after);
       const resourcesAffected = new Set(diff.map((d) => d.resourceId)).size;
       const hasResult = result !== undefined;
       const mode = diff.length === 0 ? 'read' : hasResult ? 'read_write' : 'write';
@@ -76,7 +77,7 @@ export function createCodeSurface(runNonce?: string, inv: Inventory = createRunI
             mode,
             note:
               diff.length > 0
-                ? 'Code ran once against a sanitized projection clone. The runtime derived this change set by diffing before and after projections, then applied it to the run estate.'
+                ? 'Code ran against a projection copy. The runtime validated the supported edits and proposed this diff; the loop applies it unless review declines it.'
                 : 'Code ran once against the sanitized inventory projection. Exact per-resource reads are not instrumented in V1.',
             resourceCount: inv.resources.length,
             logCount: logs.length,

@@ -71,7 +71,9 @@ export const SCHEMA_DOC = `
 //   projection against the original, derives the change set, and applies it
 //   (a reviewer may hold it for approval first).
 // - A script may both mutate data and return a summary.
-// - Mutate tags and scalar fields only (for example, r.tags.owner or r.powerState).
+// - Only tags (string values) and virtualMachine.powerState are writable.
+//   Other fields, snapshot metadata and resource membership are read-only;
+//   unsupported edits reject the entire proposal.
 // - To deallocate a VM, set r.powerState = 'deallocated' on matching VMs
 //   that are not already deallocated.
 //

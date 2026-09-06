@@ -19,7 +19,7 @@ export const CODE_TOOLS: ToolSchema[] = [
         'Provide code that defines `function main(data, ctx) { ... }`.',
         'For reads, return any JSON-serialisable value. For writes, mutate `data` in place; the runtime diffs your mutated projection against the original, derives the change set, and applies it (a reviewer may hold it for approval first).',
         'A single script may both return a summary and mutate data. Prefer one pass over `data.resources` where possible.',
-        'If you mutate data, include a short rationale. Mutate tags and scalar fields only, for example `r.tags.owner` or `r.powerState`.',
+        'If you mutate data, include a short rationale. Only tags (string values) and VM powerState are writable. Other changes reject the proposal.',
         'When the user asks for a state change, assign the target field on `data`; for example, deallocation is `r.powerState = "deallocated"` for VMs that are not already deallocated.',
         '',
         'Projection shape and examples:',
