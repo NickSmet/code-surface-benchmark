@@ -153,7 +153,7 @@
   }
 
   function onWindowKey(e: KeyboardEvent): void {
-    const t = e.target as HTMLElement | null;
+    const t = e.target instanceof HTMLElement ? e.target : null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape') {

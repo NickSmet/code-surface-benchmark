@@ -254,7 +254,7 @@
   }
 
   function onWindowKey(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && !e.defaultPrevented && !(e.target as HTMLElement | null)?.closest('textarea')) pinnedId = null;
+    if (e.key === 'Escape' && !e.defaultPrevented && !(e.target instanceof HTMLElement && e.target.closest('textarea'))) pinnedId = null;
   }
 
   onMount(() => {
