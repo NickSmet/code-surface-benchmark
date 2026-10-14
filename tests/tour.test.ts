@@ -7,10 +7,13 @@ import { sameChanges } from '../src/lib/bench-checks';
 import { runBench } from '../src/lib/agent/loop';
 import { MAX_ITERATIONS } from '../src/lib/agent/limits';
 import { createCatalogSurface } from '../src/lib/surfaces/catalog';
+import { createCodeSurface } from '../src/lib/surfaces/code';
+import { OPERATE_NAME } from '../src/lib/surfaces/code/schemas';
+import type { Surface } from '../src/lib/surfaces/types';
 import type { ChatTurnArgs, ProviderClient, ProviderToolCall } from '../src/lib/agent/providers/types';
 import { buildEstateModel } from '../src/lib/tour/estate';
 import { createCatalogSim } from '../src/lib/tour/catalog-sim';
-import { callId, type Replay } from '../src/lib/tour/replay';
+import { callId, toolMessageTokens, type Replay } from '../src/lib/tour/replay';
 import { CATALOG_ROUTES, replayCatalog } from '../src/lib/tour/scenarios';
 import { needleFor } from '../src/lib/tour/needles';
 import { countMarks, dominantKind, marksAt } from '../src/lib/tour/touch';
@@ -20,9 +23,9 @@ import { readFileSync } from 'node:fs';
 import { runTracked } from '../src/lib/tour/code-run';
 import { CONTRACT_PROBES, TASK_ORDER, parseSolutionPrograms } from '../src/lib/tour/programs';
 import { codeTouches, replayCode } from '../src/lib/tour/code-compare';
-import { PART_KEYS, billedAt, billedSplit, callSummary, costFacts, lastFrame, promptSplit, stepBadge, turnAt, turnFlow } from '../src/lib/tour/replay-view';
+import { PART_KEYS, billedAt, billedSplit, callSummary, costFacts, lastFrame, promptSplit, runBill, stepBadge, turnAt, turnFlow, turnResultTokens } from '../src/lib/tour/replay-view';
 import { clipLines, isJson, prettyJson, tokenizeJson } from '../src/lib/tour/json-highlight';
-import { compareSurfaces, comparisonHeadline, comparisonLesson, groupDiff, outcomeCaption, probeResult, seenBy, splitBill } from '../src/lib/tour/code-view';
+import { answerFor, backToModelTokens, compareSurfaces, comparisonHeadline, comparisonLesson, groupDiff, outcomeCaption, probeResult, replayRun, seenBy } from '../src/lib/tour/code-view';
 import {
   FEATURES,
   FEATURE_IDS,
@@ -468,57 +471,85 @@ function allCatalogRuns(): Array<{ label: string; task: TaskId; replay: Replay }
   return runs;
 }
 
+/** Every run the screens draw: the tools screen's nine, the seven rungs of the third, and each question on both surfaces of the fourth. */
+function allScreenRuns(): Array<{ label: string; replay: Replay }> {
+  const runs = allCatalogRuns().map(({ label, replay }) => ({ label: `tools: ${label}`, replay }));
+  const cmp = compareSurfaces('filter-aggregate', programs['filter-aggregate']);
+  for (const r of buildLadder(buildInventory(), cmp.code)) runs.push({ label: `rung ${r.n}: ${r.title}`, replay: r.replay });
+  for (const task of TASK_ORDER) {
+    const c = compareSurfaces(task, programs[task]);
+    runs.push({ label: `${task}: catalogue`, replay: c.catalog }, { label: `${task}: code`, replay: c.code });
+  }
+  return runs;
+}
+
+/**
+ * Play a replay's calls through the real agent loop with a scripted model. The loop must read and
+ * write exactly what the replay says, turn by turn, and hand the model back the very same bytes.
+ */
+async function auditAgainstLoop(label: string, surface: Surface, replay: Replay): Promise<void> {
+  const scripted: ProviderToolCall[][] = replay.turns.map((t) =>
+    t.calls.map((c) => ({ id: callId(c.step), type: 'function' as const, function: { name: c.name, arguments: c.argsText } }))
+  );
+  const prompt: number[] = [];
+  const completion: number[] = [];
+  let lastResults: string[] = [];
+  let turn = 0;
+  const provider: ProviderClient = {
+    label: 'scripted',
+    model: 'scripted',
+    isStub: true,
+    async chatTurn(args: ChatTurnArgs) {
+      const chars = args.systemPrompt.length + args.messages.reduce((n, m) => n + JSON.stringify(m).length, 0) + (args.tools ? JSON.stringify(args.tools).length : 0);
+      lastResults = args.messages.flatMap((m) => (m.role === 'tool' ? [m.content] : []));
+      const calls = scripted[turn] ?? [];
+      const content = calls.length ? '' : replay.finalText;
+      const out = calls.length ? calls.reduce((n, c) => n + estimateTokens(c.function.name + c.function.arguments), 0) : estimateTokens(content);
+      turn += 1;
+      const p = Math.ceil(chars / 4);
+      prompt.push(p);
+      completion.push(out);
+      return { content, toolCalls: calls, usage: { promptTokens: p, cachedPromptTokens: 0, completionTokens: out, totalTokens: p + out } };
+    }
+  };
+  let metrics: { promptTokens: number; completionTokens: number; turns: number; toolCalls: number } | null = null;
+  let stopped: string | null = null;
+  for await (const e of runBench({ provider, surface, task: replay.task, env: {} })) {
+    if (e.type === 'complete') metrics = e.metrics;
+    if (e.type === 'error') {
+      metrics = e.metrics;
+      stopped = e.message;
+    }
+  }
+  assert.ok(metrics, label);
+  // The benchmark's loop gives a model MAX_ITERATIONS turns. A replay that needs more is a what-if:
+  // the loop agrees with it turn by turn up to the cap and then stops the run.
+  const played = replay.turns.slice(0, MAX_ITERATIONS);
+  if (replay.turns.length > MAX_ITERATIONS) assert.match(stopped ?? '', new RegExp(`did not finish within ${MAX_ITERATIONS} turns`), label);
+  else assert.equal(stopped, null, `${label}: the loop finishes the run`);
+  // The replay says the same thing the real loop measured, turn by turn, not just in total.
+  assert.deepEqual(prompt, played.map((t) => t.promptTokens), `${label}: input per turn`);
+  assert.deepEqual(completion, played.map((t) => t.completionTokens), `${label}: output per turn`);
+  assert.equal(metrics!.turns, played.length, `${label}: turns`);
+  assert.equal(metrics!.toolCalls, played.reduce((n, t) => n + t.calls.length, 0), `${label}: calls`);
+  assert.equal(metrics!.promptTokens, played.reduce((n, t) => n + t.promptTokens, 0), `${label}: input total`);
+  assert.equal(metrics!.completionTokens, played.reduce((n, t) => n + t.completionTokens, 0), `${label}: output total`);
+  // Same sizes could still hide different text. What the model reads back is, byte for byte, what the replay holds.
+  assert.ok(lastResults.length > 0, `${label}: the model was handed results`);
+  assert.deepEqual(lastResults, replay.calls.slice(0, lastResults.length).map((c) => c.content), `${label}: the results the model reads back`);
+}
+
 test('billing audit: the tools screen covers nine runs, and every one is billed exactly like the real agent loop, turn by turn', async () => {
   const runs = allCatalogRuns();
   assert.equal(runs.length, 9, runs.map((r) => r.label).join(' | '));
-  for (const run of runs) {
-    const replay = run.replay;
-    const surface = createCatalogSurface(undefined, buildInventory());
-    const scripted: ProviderToolCall[][] = replay.turns.map((t) =>
-      t.calls.map((c) => ({ id: callId(c.step), type: 'function' as const, function: { name: c.name, arguments: c.argsText } }))
-    );
-    const prompt: number[] = [];
-    const completion: number[] = [];
-    let turn = 0;
-    const provider: ProviderClient = {
-      label: 'scripted',
-      model: 'scripted',
-      isStub: true,
-      async chatTurn(args: ChatTurnArgs) {
-        const chars =
-          args.systemPrompt.length + args.messages.reduce((n, m) => n + JSON.stringify(m).length, 0) + (args.tools ? JSON.stringify(args.tools).length : 0);
-        const calls = scripted[turn] ?? [];
-        const content = calls.length ? '' : replay.finalText;
-        const out = calls.length ? calls.reduce((n, c) => n + estimateTokens(c.function.name + c.function.arguments), 0) : estimateTokens(content);
-        turn += 1;
-        const p = Math.ceil(chars / 4);
-        prompt.push(p);
-        completion.push(out);
-        return { content, toolCalls: calls, usage: { promptTokens: p, cachedPromptTokens: 0, completionTokens: out, totalTokens: p + out } };
-      }
-    };
-    let metrics: { promptTokens: number; completionTokens: number; turns: number; toolCalls: number } | null = null;
-    let stopped: string | null = null;
-    for await (const e of runBench({ provider, surface, task: replay.task, env: {} })) {
-      if (e.type === 'complete') metrics = e.metrics;
-      if (e.type === 'error') {
-        metrics = e.metrics;
-        stopped = e.message;
-      }
-    }
-    assert.ok(metrics, run.label);
-    // The benchmark's loop gives a model MAX_ITERATIONS turns. A replay that needs more is a what-if:
-    // the loop agrees with it turn by turn up to the cap and then stops the run.
-    const played = replay.turns.slice(0, MAX_ITERATIONS);
-    if (replay.turns.length > MAX_ITERATIONS) assert.match(stopped ?? '', new RegExp(`did not finish within ${MAX_ITERATIONS} turns`), run.label);
-    else assert.equal(stopped, null, `${run.label}: the loop finishes the run`);
-    // The replay says the same thing the real loop measured, turn by turn, not just in total.
-    assert.deepEqual(prompt, played.map((t) => t.promptTokens), `${run.label}: input per turn`);
-    assert.deepEqual(completion, played.map((t) => t.completionTokens), `${run.label}: output per turn`);
-    assert.equal(metrics!.turns, played.length, `${run.label}: turns`);
-    assert.equal(metrics!.toolCalls, played.reduce((n, t) => n + t.calls.length, 0), `${run.label}: calls`);
-    assert.equal(metrics!.promptTokens, played.reduce((n, t) => n + t.promptTokens, 0), `${run.label}: input total`);
-    assert.equal(metrics!.completionTokens, played.reduce((n, t) => n + t.completionTokens, 0), `${run.label}: output total`);
+  for (const run of runs) await auditAgainstLoop(run.label, createCatalogSurface(undefined, buildInventory()), run.replay);
+});
+
+test('billing audit: the code surface, for every question, is billed exactly like the real agent loop, turn by turn', async () => {
+  for (const task of TASK_ORDER) {
+    const { code } = compareSurfaces(task, programs[task]);
+    assert.equal(code.turns.length, 2, `${task}: write the program, then state the answer`);
+    await auditAgainstLoop(`${task}/code`, createCodeSurface(undefined, buildInventory()), code);
   }
 });
 
@@ -531,7 +562,7 @@ test('billing audit: exactly two what-if runs are longer than the benchmark lets
 });
 
 test('billing audit: each request is the one before plus the last turn’s calls and results, and nothing else', () => {
-  for (const { label, replay } of allCatalogRuns()) {
+  for (const { label, replay } of allScreenRuns()) {
     replay.turns.forEach((turn, i) => {
       for (const c of turn.calls) {
         const wrapped = JSON.stringify({ role: 'tool', tool_call_id: c.id, content: c.content });
@@ -560,7 +591,7 @@ test('billing audit: each request is the one before plus the last turn’s calls
 });
 
 test('billing audit: a turn writes only its calls, the last turn writes only the answer, and the totals are their sum', () => {
-  for (const { label, replay } of allCatalogRuns()) {
+  for (const { label, replay } of allScreenRuns()) {
     const { turns, totals } = replay;
     const last = turns[turns.length - 1];
     turns.slice(0, -1).forEach((t) => {
@@ -587,7 +618,7 @@ test('billing audit: a turn writes only its calls, the last turn writes only the
 });
 
 test('billing audit: the bill so far splits into what was read and what was written, and ends at the run total', () => {
-  for (const { label, replay } of allCatalogRuns()) {
+  for (const { label, replay } of allScreenRuns()) {
     assert.deepEqual(billedSplit(replay, 0), { input: 0, output: 0 }, `${label}: nothing is billed before the first request`);
     let prev = 0;
     for (let f = 0; f <= lastFrame(replay); f++) {
@@ -610,7 +641,7 @@ test('billing audit: the bill so far splits into what was read and what was writ
 });
 
 test('billing audit: a turn in plain terms is what it read (cached + new) and what it wrote', () => {
-  for (const { label, replay } of allCatalogRuns()) {
+  for (const { label, replay } of allScreenRuns()) {
     replay.turns.forEach((t, i) => {
       const flow = turnFlow(replay.turns, i);
       assert.equal(flow.cached + flow.fresh, flow.input, `${label}, turn ${t.n}: cached + new is everything it read`);
@@ -620,6 +651,79 @@ test('billing audit: a turn in plain terms is what it read (cached + new) and wh
       assert.equal(flow.cached, i === 0 ? 0 : replay.turns[i - 1].promptTokens, `${label}, turn ${t.n}: what is cached is the whole request before`);
     });
   }
+});
+
+test('billing audit: a whole run is what it read (repeated + new) plus what it wrote, for every run on every screen', () => {
+  const runs = allScreenRuns();
+  assert.equal(runs.length, 9 + 7 + 8, runs.map((r) => r.label).join(' | '));
+  for (const { label, replay } of runs) {
+    const b = runBill(replay);
+    const last = replay.turns[replay.turns.length - 1];
+    assert.equal(b.cached + b.fresh, b.input, `${label}: repeated + new is everything it read`);
+    assert.equal(b.input + b.output, b.total, `${label}: read + written is the bill`);
+    assert.equal(b.total, replay.totals.billedTokens, `${label}: the bill is the run's total`);
+    assert.equal(b.output, replay.turns.reduce((n, t) => n + t.completionTokens, 0), `${label}: output`);
+    // Each request holds the one before it, so what is new adds up to the last request, once.
+    assert.equal(b.fresh, last.promptTokens, `${label}: new text, added up, is the finished conversation`);
+    assert.equal(b.cached, replay.turns.slice(0, -1).reduce((n, t) => n + t.promptTokens, 0), `${label}: repeated text is every request but the last, read once more`);
+    assert.deepEqual({ input: b.input, output: b.output }, billedSplit(replay, lastFrame(replay)), `${label}: the bill the replay screen ends on`);
+    // Every run here makes at least one call, so something is read twice.
+    assert.ok(b.cached > 0 && b.fresh > 0 && b.output > 0, label);
+  }
+});
+
+test('billing audit: a result is sized one way on every screen, as the whole message the conversation carries', () => {
+  for (const { label, replay } of allScreenRuns()) {
+    for (const c of replay.calls) {
+      assert.equal(c.resultSentTokens, toolMessageTokens(c.id, c.content), `${label}, call ${c.step}`);
+      assert.ok(c.resultSentTokens >= c.resultTokens, `${label}, call ${c.step}: the message around a result only adds`);
+    }
+    for (const t of replay.turns) assert.equal(turnResultTokens(t), t.calls.reduce((n, c) => n + c.resultSentTokens, 0), `${label}, turn ${t.n}`);
+  }
+  // On the code screen, the tile, the caption and the replay's result are one number, for every question.
+  for (const task of TASK_ORDER) {
+    const outcome = run(programs[task].code, programs[task].rationale);
+    const { code } = compareSurfaces(task, programs[task]);
+    assert.equal(backToModelTokens(outcome), code.calls[0].resultSentTokens, `${task}: what comes back to the model`);
+    assert.equal(backToModelTokens(outcome), turnResultTokens(code.turns[0]), `${task}: and what turn 1 adds`);
+    assert.ok(backToModelTokens(outcome) > estimateTokens(outcome.content), `${task}: more than the bare text`);
+  }
+});
+
+test('code run: the program in the editor is billed as the two-turn conversation it is', () => {
+  for (const task of TASK_ORDER) {
+    const program = programs[task];
+    const outcome = run(program.code, program.rationale);
+    const mine = replayRun(task, program, outcome);
+    const reference = compareSurfaces(task, program);
+    assert.deepEqual(mine.totals, reference.code.totals, `${task}: the reference run is the run the comparison bills`);
+    assert.deepEqual(runBill(mine), runBill(reference.code));
+    assert.equal(mine.finalText, answerFor(task, outcome), `${task}: it ends on the answer for this result`);
+    assert.equal(mine.finalText, reference.catalog.finalText, `${task}: the same words as the catalogue`);
+
+    const [first, second] = [turnFlow(mine.turns, 0), turnFlow(mine.turns, 1)];
+    // Turn 1 reads the setup and the question for the first time, and writes the program.
+    const args = JSON.stringify(program.rationale ? { rationale: program.rationale, code: program.code } : { code: program.code });
+    assert.equal(first.cached, 0, `${task}: nothing was sent before`);
+    assert.equal(first.fresh, first.input, `${task}: so all of it is new`);
+    assert.equal(first.output, estimateTokens(OPERATE_NAME + args), `${task}: what it writes is the call: the tool's name and the program`);
+    assert.equal(mine.calls[0].callTokens, first.output);
+    // Turn 2 reads all of turn 1 again, plus its own call and the result, and writes the answer.
+    assert.equal(second.cached, mine.turns[0].promptTokens, `${task}: it reads the whole first request again`);
+    assert.ok(second.fresh > turnResultTokens(mine.turns[0]), `${task}: what is new is its own call and the result`);
+    assert.equal(second.output, estimateTokens(mine.finalText), `${task}: it writes the answer`);
+    assert.equal(mine.turns[1].calls.length, 0);
+  }
+
+  // A program that fails is a call and its error: the model would read the error and try again.
+  const broken = 'function main(data) { throw new Error("boom"); }';
+  const failed = run(broken);
+  const replay = replayRun('granular-read', { code: broken }, failed);
+  assert.equal(replay.calls.length, 1);
+  assert.equal(replay.calls[0].error, true);
+  assert.equal(replay.calls[0].content, failed.content);
+  assert.equal(turnResultTokens(replay.turns[0]), backToModelTokens(failed));
+  assert.equal(turnFlow(replay.turns, 0).output, estimateTokens(OPERATE_NAME + JSON.stringify({ code: broken })));
 });
 
 test('replay view: each request splits into what it repeats and what is new', () => {
@@ -789,16 +893,7 @@ test('code view: the head-to-head says the same thing about both surfaces, inclu
   assert.match(comparisonHeadline(c['single-lookup']), /^Here the catalogue wins/);
 });
 
-test('code view: the bill split adds back up, and each lesson quotes the numbers it was computed from', () => {
-  for (const t of TASK_ORDER) {
-    const c = compareSurfaces(t, programs[t]);
-    for (const r of [c.catalog, c.code]) {
-      const { setup, rest } = splitBill(r);
-      assert.equal(setup + rest, r.totals.billedTokens);
-      assert.equal(setup, r.totals.fixedTokens * r.totals.turns, 'setup is the fixed tokens, re-sent once per turn');
-      assert.ok(rest > 0);
-    }
-  }
+test('code view: each lesson quotes the numbers it was computed from', () => {
   const read = comparisonLesson(compareSurfaces('granular-read', programs['granular-read']));
   assert.match(read, /chains 3 calls over 4 turns/);
   assert.match(read, /makes 1 call/);
@@ -836,7 +931,8 @@ test('ladder: seven tool designs reach the same answer, and the three taxes show
   const billed = ladder.map((r) => r.replay.totals.billedTokens);
   assert.equal(Math.min(...billed), billed[5]);
   assert.ok(billed[5] < billed[6], 'the language beats code on its own question');
-  for (const r of ladder) assert.equal(r.split.setup + r.split.rest, r.replay.totals.billedTokens);
+  for (const r of ladder) assert.equal(r.bill.total, r.replay.totals.billedTokens, `${r.id}: the bar is the bill`);
+  assert.deepEqual(ladder[6].bill, runBill(cmp.code), 'the last rung is the very run the next screen compares');
 });
 
 test('query language: filter, group, aggregate, project, order and page behave like the data says', () => {
@@ -1045,12 +1141,14 @@ test('ladder facts quote the replay, and every example query runs once the featu
   const cmp = compareSurfaces('filter-aggregate', programs['filter-aggregate']);
   const ladder = buildLadder(buildInventory(), cmp.code);
   const facts = ladder.map(rungFacts);
-  assert.match(facts[0][0], /^58 calls over 4 turns, \u2248 11\.2k tokens billed\.$/);
+  assert.match(facts[0][0], /^58 calls over 4 turns\.$/);
   assert.match(facts[0][1], /^15 tools to describe: \u2248 1,137 tokens/);
   assert.match(facts[1][1], /each of its results is \u2248 \d+ tokens/);
   const lookups = ladder[1].replay.calls.filter((c) => c.name === 'get_vm_properties');
-  const mean = Math.round(lookups.reduce((n, c) => n + c.resultTokens, 0) / lookups.length);
+  // A result's size is what the conversation carries, here as everywhere else.
+  const mean = Math.round(lookups.reduce((n, c) => n + c.resultSentTokens, 0) / lookups.length);
   assert.ok(facts[1][1].includes(`each of its results is \u2248 ${mean} tokens`), 'the fact quotes the mean of the lookups the call list shows');
+  assert.equal(fmtTokens(ladder[0].bill.total), '11.2k', 'the bill the row shows is the one the bar draws');
   assert.match(facts[4][0], /^1 call over 2 turns/);
   assert.match(facts[5][1], /^The cheapest bill here/);
   assert.match(facts[6][1], /1,312 tokens of setup per turn/);

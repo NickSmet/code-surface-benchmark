@@ -5,10 +5,16 @@
   import solutionDoc from '../../../../docs/solution-path-examples.md?raw';
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { buildProjection } from '$lib/inventory/projection';
+  import BillLine from '$lib/components/tour/BillLine.svelte';
+  import FlowLine from '$lib/components/tour/FlowLine.svelte';
+  import RunBar from '$lib/components/tour/RunBar.svelte';
+  import RunLegend from '$lib/components/tour/RunLegend.svelte';
   import StatTile from '$lib/components/tour/StatTile.svelte';
+  import Tip from '$lib/components/tour/Tip.svelte';
   import TourNav from '$lib/components/tour/TourNav.svelte';
   import { compareSurfaces } from '$lib/tour/code-view';
   import { runTracked } from '$lib/tour/code-run';
+  import { CACHE_TIP } from '$lib/tour/explain';
   import {
     EXAMPLE_QUERIES,
     FEATURES,
@@ -28,6 +34,8 @@
     type RungId
   } from '$lib/tour/language';
   import { parseSolutionPrograms } from '$lib/tour/programs';
+  import { callId, toolMessageTokens } from '$lib/tour/replay';
+  import { turnFlow, turnResultTokens, type TurnFlow } from '$lib/tour/replay-view';
   import { taskPrompt } from '$lib/tour/scenarios';
   import { fmtTokens } from '$lib/tour/tokens';
   import { fmtInt } from '$lib/utils';
@@ -44,8 +52,8 @@
   const codeDefinition = compare.code.turns[0].parts.tools;
   const baseDefinition = definitionTokens([queryTool(new Set())]);
   const baseWords = keywords(queryTool(new Set())).length;
-  const maxBilled = Math.max(...ladder.map((r) => r.replay.totals.billedTokens));
-  const maxResult = Math.max(...ladder.flatMap((r) => r.replay.calls.map((c) => c.resultTokens)));
+  const maxBilled = Math.max(...ladder.map((r) => r.bill.total));
+  const maxResult = Math.max(...ladder.flatMap((r) => r.replay.calls.map((c) => c.resultSentTokens)));
   const RUNG_IDS = ladder.map((r) => r.id);
 
   /** JSON for reading: short objects stay on one line, long ones open up. */
@@ -203,7 +211,8 @@
     if (!outcome.out) return null;
     const text = queryContent(outcome.out);
     const body = reformat(text);
-    return { text: showAllResult ? body : clip(body), tokens: Math.ceil(text.length / 4), long: body.length > 2600 };
+    // Counted as the model receives it, the same way the replays count a result.
+    return { text: showAllResult ? body : clip(body), tokens: toolMessageTokens(callId(1), text), long: body.length > 2600 };
   });
 
   /** Names of what a tool takes, for the one-line list in the detail panel. */
@@ -212,21 +221,24 @@
     return Object.keys(props).join(', ');
   }
 
-  type Wave = { turn: number; groups: Array<{ name: string; count: number; example: string; tokens: number }> };
+  /** One model turn that made calls: what it read and wrote, what came back, and the calls grouped by tool. */
+  type Wave = { turn: number; flow: TurnFlow; result: number; groups: Array<{ name: string; count: number; example: string; tokens: number }> };
   const waves = $derived.by<Wave[]>(() =>
-    rung.replay.turns
-      .filter((t) => t.calls.length > 0)
-      .map((t) => {
-        const byName = new Map<string, { name: string; count: number; example: string; tokens: number }>();
-        for (const c of t.calls) {
-          const g = byName.get(c.name) ?? { name: c.name, count: 0, example: c.argsText, tokens: 0 };
-          g.count += 1;
-          g.tokens += c.resultTokens;
-          byName.set(c.name, g);
-        }
-        return { turn: t.n, groups: [...byName.values()] };
-      })
+    rung.replay.turns.flatMap((t, i) => {
+      if (t.calls.length === 0) return [];
+      const byName = new Map<string, { name: string; count: number; example: string; tokens: number }>();
+      for (const c of t.calls) {
+        const g = byName.get(c.name) ?? { name: c.name, count: 0, example: c.argsText, tokens: 0 };
+        g.count += 1;
+        // As the next request carries it, so these add up to the turn's result.
+        g.tokens += c.resultSentTokens;
+        byName.set(c.name, g);
+      }
+      return [{ turn: t.n, flow: turnFlow(rung.replay.turns, i), result: turnResultTokens(t), groups: [...byName.values()] }];
+    })
   );
+  /** The last turn reads everything and writes the answer. */
+  const answerFlow = $derived(turnFlow(rung.replay.turns, rung.replay.turns.length - 1));
 </script>
 
 <svelte:head>
@@ -248,12 +260,12 @@
 </header>
 
 <section class="t-panel t-panel-pad ladder-panel" aria-label="Seven tool designs">
-  <div class="cols" aria-hidden="true">
-    <span></span>
-    <span class="c-name">Tool design</span>
-    <span class="c-calls"><b>Round trips.</b> One square per call, darker for a bigger result. One group per model turn.</span>
-    <span class="c-setup"><b>Schema tax.</b> Sent every turn</span>
-    <span class="c-bill"><b>Billed.</b> <i class="sw setup"></i> setup re-sent <i class="sw rest"></i> everything else</span>
+  <div class="cols">
+    <span aria-hidden="true"></span>
+    <span class="c-name" aria-hidden="true">Tool design</span>
+    <span class="c-calls" aria-hidden="true"><b>Round trips.</b> One square per call, darker for a bigger result. One group per model turn.</span>
+    <span class="c-setup" aria-hidden="true"><b>Schema tax.</b> Sent every turn</span>
+    <span class="c-bill"><span><b>Billed.</b> Tokens read and written, at full price.</span><RunLegend /></span>
   </div>
   <div class="ladder" role="radiogroup" aria-label="Tool designs, from one tool per property to code">
     {#each ladder as r, i (r.id)}
@@ -284,14 +296,15 @@
           {/each}
           <span class="count">{t.calls} {t.calls === 1 ? 'call' : 'calls'}</span>
         </span>
-        <span class="setup-num"><i class="narrow">Sent every turn: </i>≈ {fmtInt(r.setupTokens)}</span>
+        <span class="setup-num"><i class="narrow">Sent every turn:</i> ≈ {fmtInt(r.setupTokens)}</span>
         <span class="bill">
-          <span class="bar"><span class="seg setup" style:width="{(r.split.setup / maxBilled) * 100}%"></span><span class="seg rest" style:width="{(r.split.rest / maxBilled) * 100}%"></span></span>
-          <b>≈ {fmtTokens(t.billedTokens)}</b>
+          <RunBar bill={r.bill} scale={maxBilled} />
+          <b>≈ {fmtTokens(r.bill.total)}</b>
         </span>
       </button>
     {/each}
   </div>
+  <p class="ladder-legend"><b>Billed.</b> Tokens read and written, at full price. <RunLegend /></p>
   <div class="story" aria-live="polite">
     <div class="story-body">
       <p class="story-k">{next ? `What pushes you from rung ${rung.n} to rung ${next.n}` : 'Where it lands'}</p>
@@ -356,22 +369,30 @@
           <li>
             <span class="wn">Turn {w.turn}</span>
             <span class="wbody">
+              <FlowLine flow={w.flow} result={w.result} />
               {#each w.groups as g (g.name)}
-                <span class="wline"><b>{g.count > 1 ? `${g.count} × ` : ''}</b><code>{g.name}</code> <span class="t-muted">{g.count > 1 ? `≈ ${fmtInt(Math.round(g.tokens / g.count))} tokens each` : `≈ ${fmtInt(g.tokens)} tokens`}</span></span>
+                <span class="wline"><b>{g.count > 1 ? `${g.count} × ` : ''}</b><code>{g.name}</code> <span class="t-muted">{g.count > 1 ? `result ≈ ${fmtInt(Math.round(g.tokens / g.count))} each` : `result ≈ ${fmtInt(g.tokens)}`}</span></span>
               {/each}
             </span>
           </li>
         {/each}
-        <li><span class="wn">Turn {rung.replay.totals.turns}</span><span class="wbody"><span class="wline">The answer, in ≈ {fmtInt(rung.replay.totals.answerTokens)} tokens.</span></span></li>
+        <li>
+          <span class="wn">Turn {rung.replay.totals.turns}</span>
+          <span class="wbody"><FlowLine flow={answerFlow} /></span>
+        </li>
       </ol>
     </div>
 
     <div class="d-col">
       <h3 class="t-h2">What it costs</h3>
       <ul class="fact-list">
-        {#each facts as f (f)}<li>{f}</li>{/each}
+        <li>{facts[0]}</li>
+        <li class="bill-sum"><BillLine bill={rung.bill} /></li>
+        {#each facts.slice(1) as f (f)}<li>{f}</li>{/each}
       </ul>
-      <p class="d-note">Estimated as ceil(characters ÷ 4) a message, billed the way the benchmark bills, with no prompt caching.</p>
+      <p class="d-note">
+        Estimated as ceil(characters ÷ 4) a message, every token at full price, the way the benchmark counts. <Tip text={CACHE_TIP}>Cached input</Tip> usually costs about a tenth.
+      </p>
     </div>
   </div>
 </section>
@@ -724,23 +745,21 @@
     font-size: 15px;
     font-variant-numeric: tabular-nums;
   }
-  .bar {
-    flex: 1;
+  .c-bill {
     display: flex;
-    height: 16px;
-    border-radius: 5px;
-    overflow: hidden;
-    background: var(--color-expanded-bg);
+    flex-direction: column;
+    gap: 2px;
   }
-  .seg {
-    height: 100%;
-    transition: width 0.3s ease;
+  /* The legend is in the header when there is one, and under the list when the header is gone. */
+  .ladder-legend {
+    display: none;
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--color-text-muted);
   }
-  .seg.setup,
-  .sw.setup {
-    background: #c7d2fe;
+  .ladder-legend b {
+    color: var(--color-text-secondary);
   }
-  .seg.rest,
   .sw.rest {
     background: #6366f1;
   }
@@ -755,14 +774,12 @@
   .sw.mark {
     background: #0f172a;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .seg {
-      transition: none;
-    }
-  }
   @media (max-width: 1100px) {
     .cols {
       display: none;
+    }
+    .ladder-legend {
+      display: block;
     }
     .rung {
       grid-template-columns: 32px minmax(0, 1fr);
@@ -988,7 +1005,8 @@
   }
   .l-tiles {
     display: flex;
-    gap: 22px;
+    flex-wrap: wrap;
+    gap: 10px 22px;
     flex: none;
   }
   .l-grid {

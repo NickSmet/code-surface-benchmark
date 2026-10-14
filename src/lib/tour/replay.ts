@@ -133,6 +133,16 @@ function chars(m: Message): number {
   return JSON.stringify(m).length;
 }
 
+/**
+ * Tokens a tool result takes up in the conversation: the whole tool message, with its call id
+ * and the text quoted, not the bare text. This is what the model is billed for every time it
+ * reads the result, so it is the number to show wherever a result's size is shown.
+ */
+export function toolMessageTokens(id: string, content: string): number {
+  const message: Message = { role: 'tool', tool_call_id: id, content };
+  return estimateTokens(JSON.stringify(message));
+}
+
 export function runReplay(
   surface: SimSurface,
   task: string,
@@ -200,7 +210,7 @@ export function runReplay(
         content: res.content,
         preview: res.preview,
         resultTokens: estimateTokens(res.content),
-        resultSentTokens: estimateTokens(JSON.stringify(toolMessage)),
+        resultSentTokens: toolMessageTokens(tc.id, res.content),
         error: res.error,
         diff: res.diff,
         touches: events

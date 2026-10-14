@@ -22,6 +22,16 @@ export const OUTPUT_ANSWER_TIP =
 export const RESULT_TIP =
   'What the tool sent back. The model does not write it. It joins the conversation and is read as input on the next turn.';
 
+/** The same ideas over a whole run, for the bars that stand for every turn at once. */
+export const INPUT_RUN_TIP =
+  'Everything the model read, added up over every turn. It has no memory, so each turn reads the instructions, the tool definitions, the question and the conversation so far all over again.';
+
+export const NEW_TIP =
+  'Text the model reads for the first time: the instructions, the question, and each call and result the first time it appears. Added up, it is the size of the finished conversation.';
+
+export const BILLED_TIP =
+  'Input plus output, in tokens, every token at full price. Tokens, not dollars: output usually costs more than input, and cached input usually costs about a tenth.';
+
 /** The explanation under the Answer tab: why the last turn is big and its output is small. */
 export const ANSWER_NOTE =
   'The model has no memory between turns. To answer, it reads the whole conversation again, including the last result, and writes only the answer.';

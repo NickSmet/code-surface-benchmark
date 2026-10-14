@@ -46,7 +46,7 @@ For a walk-through with no model involved, open `/tour`. Four screens, each its 
 3. `/tour/language`: the same question on seven tool designs, ending in a query language you can grow feature by feature.
 4. `/tour/code`: a program run for real over the object, with its change set grouped by resource.
 
-Tool outputs come from the real handlers and the bill uses the benchmark's own accounting (an estimate of one token per four characters, no prompt caching). The call sequences are scripted, so these screens show the shape of each approach, not a measurement.
+Tool outputs come from the real handlers and the bill uses the benchmark's own accounting: an estimate of one token per four characters, split on every screen into what the model reads (text it already read on the turn before, called cached, plus new text) and what it writes. Every token is counted at full price, so the totals are tokens, not dollars; a provider with prompt caching would bill the cached part at roughly a tenth. The call sequences are scripted, so these screens show the shape of each approach, not a measurement.
 
 [Try it locally](#try-it) · [Read example programs](docs/solution-path-examples.md) · [Run benchmarks](#running-benchmarks) · [Comparison scope](#what-this-comparison-tells-you)
 

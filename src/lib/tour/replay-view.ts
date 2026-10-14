@@ -137,6 +137,38 @@ export function turnFlow(turns: ReplayTurn[], index: number): TurnFlow {
   return { input: turn.promptTokens, cached: s.cachedTokens, fresh: s.freshTokens, output: turn.completionTokens, calls: turn.calls.length };
 }
 
+/** A whole run in the same terms as one turn: what the model read, split into repeated and new, and what it wrote. */
+export interface RunBill {
+  /** Tokens the model read, over every turn. */
+  input: number;
+  /** Of the input: text identical to the request before it. A provider with prompt caching can bill this at a discount. */
+  cached: number;
+  /** Of the input: text read for the first time. Each request contains the one before it, so this is the size of the last request. */
+  fresh: number;
+  /** Tokens the model wrote, over every turn. */
+  output: number;
+  /** Input plus output, every token at full price: the bill as the benchmark counts it. */
+  total: number;
+}
+
+export function runBill(replay: Replay): RunBill {
+  let cached = 0;
+  let fresh = 0;
+  for (let i = 0; i < replay.turns.length; i++) {
+    const flow = turnFlow(replay.turns, i);
+    cached += flow.cached;
+    fresh += flow.fresh;
+  }
+  const input = replay.totals.promptTokens;
+  const output = replay.totals.completionTokens;
+  return { input, cached, fresh, output, total: input + output };
+}
+
+/** Tokens a turn's tool results add to the next request, as the conversation carries them. */
+export function turnResultTokens(turn: ReplayTurn): number {
+  return turn.calls.reduce((n, c) => n + c.resultSentTokens, 0);
+}
+
 /** Parts are each rounded up on their own, so they can overshoot the whole: the biggest absorbs the difference. */
 function settle(parts: Record<PartKey, number>, exact: number): Record<PartKey, number> {
   const out = { ...parts };

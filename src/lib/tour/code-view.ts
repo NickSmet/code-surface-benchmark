@@ -8,13 +8,14 @@
 
 import { buildInventory } from '$lib/inventory/fixtures/builders';
 import { buildProjection, type ChangeRow } from '$lib/inventory/projection';
+import type { Inventory } from '$lib/inventory/types';
 import { factsFromCodeResult, formatAnswer, type TaskId } from './answers';
 import { replayCode } from './code-compare';
 import { runTracked, type RunOutcome } from './code-run';
 import type { CodeProgram, ContractProbe } from './programs';
-import type { Replay } from './replay';
-import { CATALOG_ROUTES, replayCatalog } from './scenarios';
-import { estimateTokens, fmtTokens } from './tokens';
+import { callId, toolMessageTokens, type Replay } from './replay';
+import { CATALOG_ROUTES, replayCatalog, taskPrompt } from './scenarios';
+import { fmtTokens } from './tokens';
 
 const plural = (n: number, one: string, many = one + 's'): string => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
@@ -24,9 +25,13 @@ export function seenBy(o: RunOutcome): { resources: number; groups: number } {
   return { resources: ids.size, groups: o.namedGroups.length };
 }
 
-/** What the model was handed back, as tokens. This is the only thing from the run that enters its context. */
+/**
+ * What the model was handed back, as tokens: the tool result as the conversation carries it, which
+ * is what every later request is billed for. It is the same number the replays show for a result.
+ * This is the only thing from the run that enters the model's context.
+ */
 export function backToModelTokens(o: RunOutcome): number {
-  return estimateTokens(o.content);
+  return toolMessageTokens(callId(1), o.content);
 }
 
 export interface Caption {
@@ -155,20 +160,23 @@ function safeParse(text: string | null): unknown {
   }
 }
 
+/** What the model says once it has this result: the answer, in the benchmark's wording, when the result carries the facts. */
+export function answerFor(task: TaskId, o: RunOutcome): string {
+  const facts = factsFromCodeResult(task, safeParse(o.resultText));
+  return facts ? formatAnswer(facts) : (o.resultText ?? '');
+}
+
+/** One run of a program as the two-turn conversation it is, billed like every other replay. */
+export function replayRun(task: TaskId, program: Pick<CodeProgram, 'code' | 'rationale'>, outcome: RunOutcome, inventory: Inventory = buildInventory()): Replay {
+  return replayCode({ task: taskPrompt(task), code: program.code, rationale: program.rationale, outcome, inventory, finalText: answerFor(task, outcome) });
+}
+
 /** The reference program for a task, replayed against the best-case catalogue route for the same task. */
 export function compareSurfaces(task: TaskId, program: CodeProgram): Comparison {
   const outcome = runTracked({ code: program.code, projection: buildProjection(buildInventory()), rationale: program.rationale });
-  const facts = factsFromCodeResult(task, safeParse(outcome.resultText));
-  const finalText = facts ? formatAnswer(facts) : (outcome.resultText ?? '');
   const catalog = replayCatalog({ task });
-  const code = replayCode({
-    task: catalog.task,
-    code: program.code,
-    rationale: program.rationale,
-    outcome,
-    inventory: buildInventory(),
-    finalText
-  });
+  const code = replayRun(task, program, outcome);
+  const finalText = code.finalText;
   const ratio = catalog.totals.billedTokens / Math.max(1, code.totals.billedTokens);
   return {
     task,
@@ -186,12 +194,6 @@ export function comparisonHeadline(c: Comparison): string {
   if (c.winner === 'code') return `At its best, the catalogue is billed ${times(c.ratio)} the tokens of the code surface.`;
   if (c.winner === 'catalog') return `Here the catalogue wins: the code surface is billed ${times(1 / c.ratio)} the tokens of one narrow tool.`;
   return 'About the same bill on both surfaces.';
-}
-
-/** A bill split into what is re-sent on every turn regardless of the question, and everything else. */
-export function splitBill(r: Replay): { setup: number; rest: number } {
-  const setup = r.turns.reduce((n, t) => n + t.parts.system + t.parts.tools, 0);
-  return { setup, rest: r.totals.billedTokens - setup };
 }
 
 /** One or two sentences on why the head-to-head came out this way. Every number is read off the two replays. */

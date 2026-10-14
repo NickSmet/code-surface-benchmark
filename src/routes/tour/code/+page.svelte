@@ -7,9 +7,13 @@
   import { applyChangeRows } from '$lib/inventory/apply';
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { buildProjection } from '$lib/inventory/projection';
-  import { SCHEMA_DOC } from '$lib/surfaces/code/helpers';
+  import { CODE_TOOLS } from '$lib/surfaces/code/schemas';
   import { TASKS } from '$lib/tasks';
+  import BillLine from '$lib/components/tour/BillLine.svelte';
   import EstateMap, { type GroupPaint } from '$lib/components/tour/EstateMap.svelte';
+  import FlowLine from '$lib/components/tour/FlowLine.svelte';
+  import RunBar from '$lib/components/tour/RunBar.svelte';
+  import RunLegend from '$lib/components/tour/RunLegend.svelte';
   import Segmented from '$lib/components/tour/Segmented.svelte';
   import StatTile from '$lib/components/tour/StatTile.svelte';
   import TouchLegend from '$lib/components/tour/TouchLegend.svelte';
@@ -28,13 +32,14 @@
     groupDiff,
     outcomeCaption,
     probeResult,
-    splitBill
+    replayRun
   } from '$lib/tour/code-view';
   import { buildEstateModel } from '$lib/tour/estate';
   import { TYPE_LABEL } from '$lib/tour/facts';
   import { needleFor } from '$lib/tour/needles';
   import { COLORS, touchPaint, type Paint } from '$lib/tour/paint';
   import { CONTRACT_PROBES, TASK_ORDER, parseSolutionPrograms, type ContractProbe } from '$lib/tour/programs';
+  import { turnFlow, turnResultTokens, runBill } from '$lib/tour/replay-view';
   import { taskPrompt } from '$lib/tour/scenarios';
   import { estimateTokens, fmtTokens } from '$lib/tour/tokens';
   import { countMarks, marksAt, type TouchKind } from '$lib/tour/touch';
@@ -148,21 +153,31 @@
       : `${outcome.resourcesAffected} resources, ${decision === 'approved' ? 'applied' : decision === 'declined' ? 'declined' : 'awaiting review'}`
   );
 
-  const bars = $derived.by(() => {
-    const rows = [
+  const bars = $derived(
+    [
       { id: 'catalog', label: 'Catalogue, best case', replay: cmp.catalog },
       { id: 'code', label: 'Code surface', replay: cmp.code }
-    ].map((r) => ({ ...r, ...splitBill(r.replay) }));
-    const max = Math.max(...rows.map((r) => r.setup + r.rest));
-    return rows.map((r) => ({ ...r, setupPct: (r.setup / max) * 100, restPct: (r.rest / max) * 100 }));
-  });
+    ].map((r) => ({ ...r, bill: runBill(r.replay) }))
+  );
+  /** Both bars on one scale, so their lengths compare. */
+  const barScale = $derived(Math.max(...bars.map((b) => b.bill.total)));
+
+  // The run in the editor, as the conversation it is: the model reads the setup and the question and writes
+  // the program, the runtime sends back the result, then the model reads all of it again and writes the answer.
+  // A run that did not succeed has no answer yet: the model would read the error and try again.
+  const live = $derived(outcome ? replayRun(taskId, { code: ranCode, rationale: program.rationale }, outcome, pristine) : null);
+  const succeeded = $derived(outcome?.status === 'ok');
+  const liveTurns = $derived(live ? (succeeded ? live.turns : live.turns.slice(0, 1)) : []);
+  const liveBill = $derived(live ? runBill(live) : null);
 
   // The "see" layer, made concrete: one stored record against what the program is given.
   const heroStored = pristine.resources.find((r) => r.name === 'web-prod-03')!;
   const heroProjected = buildProjection(pristine).resources.find((r) => r.name === 'web-prod-03')!;
   const heroFields = { stored: Object.keys(heroStored).length, seen: Object.keys(heroProjected).length };
   const heroRemoved = Object.keys(heroStored).filter((k) => !(k in heroProjected));
-  const schemaTokens = estimateTokens(SCHEMA_DOC);
+  /** The tool description exactly as it is sent, and how much of the setup it is. */
+  const TOOL_DESCRIPTION = CODE_TOOLS[0].function.description;
+  const descriptionTokens = estimateTokens(TOOL_DESCRIPTION);
 
   // ── actions ────────────────────────────────────────────────────────
   function syncUrl(): void {
@@ -326,8 +341,30 @@
 <section class="t-panel bar" aria-label="What the run did">
   <StatTile compact label="Scanned" value={scannedValue === null ? '\u2013' : fmtInt(scannedValue)} sub="{scannedUnit}, inside the runtime" tone={COLORS.scanned} />
   <StatTile compact label="Field reads" value={outcome ? fmtInt(outcome.totals.propertyReads) : '\u2013'} sub="on resources and groups" />
-  <StatTile compact label="Back to the model" value={outcome ? '≈ ' + fmtTokens(backToModelTokens(outcome)) : '\u2013'} sub="tokens: all the model sees" tone="#4338ca" />
+  <StatTile compact label="Back to the model" value={outcome ? '≈ ' + fmtTokens(backToModelTokens(outcome)) : '\u2013'} sub={outcome && outcome.status !== 'ok' ? 'tokens: the error it reads' : 'tokens: all it sees of the estate'} tone="#4338ca" />
   <StatTile compact label="Changed" value={outcome ? fmtInt(outcome.diff.length) : '\u2013'} sub={changedSub} tone={COLORS.written} />
+</section>
+
+<section class="t-panel turns" class:stale aria-label="What the model read and wrote">
+  {#if live}
+    <ol class="turn-list">
+      {#each liveTurns as t, i (t.n)}
+        <li>
+          <span class="tn">Turn {t.n}</span>
+          <FlowLine flow={turnFlow(live.turns, i)} result={t.calls.length > 0 ? turnResultTokens(t) : undefined} what={t.calls.length > 0 ? 'the program' : undefined} />
+        </li>
+      {/each}
+    </ol>
+    <div class="turn-sum">
+      {#if succeeded && liveBill}
+        <BillLine bill={liveBill} />
+      {:else}
+        <p class="turn-note">The model would read this error and try again, so nothing is added up here.</p>
+      {/if}
+    </div>
+  {:else}
+    <p class="empty">Run the program to see what the model reads and writes.</p>
+  {/if}
 </section>
 
 <div class="layout" bind:this={layoutEl}>
@@ -559,8 +596,11 @@
     </div>
   </dl>
   <details class="schema">
-    <summary>The exact description the model is sent <span class="t-muted">(≈ {fmtTokens(schemaTokens)} tokens)</span></summary>
-    <pre class="t-code">{SCHEMA_DOC}</pre>
+    <summary>
+      The exact description the model is sent
+      <span class="t-muted">(≈ {fmtTokens(descriptionTokens)} tokens, part of the ≈ {fmtTokens(cmp.code.totals.fixedTokens)} of setup it reads on every turn)</span>
+    </summary>
+    <pre class="t-code">{TOOL_DESCRIPTION}</pre>
   </details>
 </section>
 
@@ -630,24 +670,26 @@
           <strong>{b.label}</strong>
           <span>{b.replay.totals.calls} {b.replay.totals.calls === 1 ? 'call' : 'calls'} over {b.replay.totals.turns} turns</span>
         </div>
-        <div class="cmp-bar" role="img" aria-label="{b.label}: about {fmtTokens(b.setup + b.rest)} tokens billed, of which {fmtTokens(b.setup)} is setup sent again on every turn">
-          <span class="seg setup" style:width="{b.setupPct}%"></span><span class="seg rest" style:width="{b.restPct}%"></span>
+        <div class="cmp-bar"><RunBar bill={b.bill} scale={barScale} height={26} /></div>
+        <div class="cmp-num">
+          <b>≈ {fmtTokens(b.bill.total)}</b>
+          <span>{fmtTokens(b.bill.input)} in + {fmtTokens(b.bill.output)} out</span>
         </div>
-        <div class="cmp-num">≈ {fmtTokens(b.setup + b.rest)}</div>
       </div>
     {/each}
   </div>
   <p class="cmp-legend">
-    <span class="sw setup"></span> Instructions and tool definitions, sent again on every turn
-    <span class="sw rest"></span> Everything else: the question, the calls, the results, the answer
+    <span>Tokens over the whole run, every one at full price.</span>
+    <RunLegend />
   </p>
   <p class="cmp-lesson">{comparisonLesson(cmp)}</p>
   <details class="honest">
     <summary>How honest is this comparison?</summary>
     <p>
       Both sides are replays, not a live model. The program is the reference program from this repository's solution-path document, run for real against this estate; the catalogue side is the benchmark's own
-      catalogue on its best-case route. Both bills use the benchmark's convention: characters ÷ 4, every turn re-sending everything, no prompt caching. The programs are idealised: they compute the answers
-      exactly, where a live model might not.
+      catalogue on its best-case route. Both bills use the benchmark's convention: characters ÷ 4, and every turn reads the whole conversation again, counted at full price. A provider with prompt caching
+      would bill that repeated, cached part at about a tenth, and output costs more than input, so in dollars the gap would differ from the one in tokens. The programs are idealised: they compute the
+      answers exactly, where a live model might not.
     </p>
   </details>
 </section>
@@ -694,6 +736,51 @@
     border-left: 0;
   }
 
+  /* ── what the model read and wrote, turn by turn ────────────────── */
+  .turns {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 24px;
+    padding: 9px 16px;
+    min-height: 68px;
+  }
+  .turns.stale {
+    opacity: 0.55;
+  }
+  .turn-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .turn-list li {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+  }
+  .tn {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-brand);
+  }
+  .turn-sum {
+    padding-left: 24px;
+    border-left: 1px solid var(--color-border-default);
+  }
+  .turn-note {
+    margin: 0;
+    max-width: 38ch;
+    font-size: 13px;
+    color: var(--color-text-muted);
+  }
+
   .layout {
     scroll-margin-top: 76px;
     display: grid;
@@ -714,6 +801,14 @@
     }
     .bar {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .turns {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .turn-sum {
+      padding: 6px 0 0;
+      border-left: 0;
+      border-top: 1px solid var(--color-border-default);
     }
   }
 
@@ -1010,9 +1105,10 @@
   }
   .rev-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 20px;
+    gap: 12px 20px;
   }
   .rev-lead {
     margin: 4px 0 0;
@@ -1301,7 +1397,7 @@
   }
   .cmp-row {
     display: grid;
-    grid-template-columns: 210px minmax(0, 1fr) 90px;
+    grid-template-columns: 210px minmax(0, 1fr) 124px;
     gap: 14px;
     align-items: center;
   }
@@ -1316,51 +1412,32 @@
   }
   .cmp-bar {
     display: flex;
-    height: 26px;
-    border-radius: 7px;
-    overflow: hidden;
-    background: var(--color-expanded-bg);
-  }
-  .seg.setup,
-  .sw.setup {
-    background: #c7d2fe;
-  }
-  .seg.rest,
-  .sw.rest {
-    background: #6366f1;
-  }
-  .seg {
-    height: 100%;
-    transition: width 0.35s ease;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .seg {
-      transition: none;
-    }
+    min-width: 0;
   }
   .cmp-num {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-variant-numeric: tabular-nums;
+  }
+  .cmp-num b {
     font-size: 17px;
     font-weight: 750;
-    font-variant-numeric: tabular-nums;
-    text-align: right;
+  }
+  .cmp-num span {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
   }
   .cmp-legend {
     margin: 0;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: 4px 14px;
     font-size: 13px;
     color: var(--color-text-muted);
-  }
-  .sw {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 3px;
-  }
-  .sw.rest {
-    margin-left: 10px;
   }
   .cmp-lesson {
     margin: 0;

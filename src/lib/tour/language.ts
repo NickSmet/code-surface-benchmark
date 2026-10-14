@@ -24,7 +24,7 @@ import { getResource, listResources } from '$lib/surfaces/catalog/handlers';
 import { CATALOG_TOOLS } from '$lib/surfaces/catalog/schemas';
 import { formatAnswer, type TaskId } from './answers';
 import { runReplay, type Replay, type ScriptApi, type SimResult, type SimSurface } from './replay';
-import { splitBill } from './code-view';
+import { runBill, type RunBill } from './replay-view';
 import { estimateTokens, fmtTokens } from './tokens';
 
 type Row = Record<string, unknown>;
@@ -625,8 +625,8 @@ export interface Rung {
   replay: Replay;
   /** Tokens sent on every turn before the question: instructions plus tool definitions. */
   setupTokens: number;
-  /** Billed tokens that are that setup, sent again each turn, and everything else. */
-  split: { setup: number; rest: number };
+  /** The run's bill: what the model read (repeated and new) and what it wrote. */
+  bill: RunBill;
 }
 
 function surfaceFor(inv: Inventory, id: string, label: string, tools: ToolSchema[], dispatch: SimSurface['dispatch']): SimSurface {
@@ -731,7 +731,7 @@ export function buildLadder(inv: Inventory, codeReplay: Replay): Rung[] {
       tools,
       replay,
       setupTokens: replay.totals.fixedTokens,
-      split: splitBill(replay)
+      bill: runBill(replay)
     };
   };
   const fresh = (): Inventory => structuredClone(inv);
@@ -768,7 +768,7 @@ export function buildLadder(inv: Inventory, codeReplay: Replay): Rung[] {
       tools: [],
       replay: codeReplay,
       setupTokens: codeReplay.totals.fixedTokens,
-      split: splitBill(codeReplay)
+      bill: runBill(codeReplay)
     }
   ];
   return rungs;
@@ -1005,28 +1005,31 @@ export const FRESH_QUESTIONS: FreshQuestion[] = [
 
 const plural = (n: number, one: string, many = one + 's'): string => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
 
-/** Facts about a rung, every one read off its replay. */
+/**
+ * Facts about a rung, every one read off its replay. The first is the shape of the run; what it
+ * adds up to is shown beside it from `rung.bill`, so the two cannot disagree.
+ */
 export function rungFacts(r: Rung): string[] {
   const t = r.replay.totals;
   // The per-VM lookups, not the one list that finds the VMs, so the number matches the "each" in the call list.
   const lookups = r.replay.calls.filter((c) => !c.error && c.name !== 'list_vms');
-  const avg = lookups.length ? Math.round(lookups.reduce((n, c) => n + c.resultTokens, 0) / lookups.length) : 0;
-  const bill = `${plural(t.calls, 'call')} over ${plural(t.turns, 'turn')}, \u2248 ${fmtTokens(t.billedTokens)} tokens billed.`;
+  const avg = lookups.length ? Math.round(lookups.reduce((n, c) => n + c.resultSentTokens, 0) / lookups.length) : 0;
+  const shape = `${plural(t.calls, 'call')} over ${plural(t.turns, 'turn')}.`;
   switch (r.id) {
     case 'per-property':
-      return [bill, `${plural(r.tools.length, 'tool')} to describe: \u2248 ${fmtTokens(r.setupTokens)} tokens before the question, sent again on every turn.`];
+      return [shape, `${plural(r.tools.length, 'tool')} to describe: \u2248 ${fmtTokens(r.setupTokens)} tokens before the question, sent again on every turn.`];
     case 'one-tool':
-      return [bill, `One tool is cheap to describe (\u2248 ${fmtTokens(r.setupTokens)} tokens), but each of its results is \u2248 ${fmtTokens(avg)} tokens, for a question that needs three fields.`];
+      return [shape, `One tool is cheap to describe (\u2248 ${fmtTokens(r.setupTokens)} tokens), but each of its results is \u2248 ${fmtTokens(avg)} tokens, for a question that needs three fields.`];
     case 'aspect':
-      return [bill, 'The question spans two aspects, compute for the power state and billing for cost and tags, so each running VM takes two calls.'];
+      return [shape, 'The question spans two aspects, compute for the power state and billing for cost and tags, so each running VM takes two calls.'];
     case 'aspects':
-      return [bill, 'One call per VM, but the agent cannot tell which VMs are running without asking about all of them.'];
+      return [shape, 'One call per VM, but the agent cannot tell which VMs are running without asking about all of them.'];
     case 'filter':
-      return [bill, 'One call, because the summary happens to carry the cost, tag count and power state this question needs.'];
+      return [shape, 'One call, because the summary happens to carry the cost, tag count and power state this question needs.'];
     case 'query':
-      return [bill, `The cheapest bill here, because this is the kind of question the language was built for. Its definition is already \u2248 ${fmtTokens(r.setupTokens)} tokens per turn.`];
+      return [shape, `The cheapest bill here, because this is the kind of question the language was built for. Its definition is already \u2248 ${fmtTokens(r.setupTokens)} tokens per turn.`];
     case 'code':
-      return [bill, `\u2248 ${fmtTokens(r.setupTokens)} tokens of setup per turn. That is the shape of the data, and it does not grow with the questions.`];
+      return [shape, `\u2248 ${fmtTokens(r.setupTokens)} tokens of setup per turn. That is the shape of the data, and it does not grow with the questions.`];
   }
 }
 

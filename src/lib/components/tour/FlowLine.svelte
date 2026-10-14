@@ -9,13 +9,15 @@
     flow: TurnFlow;
     /** Tokens the shown call's result adds to the next request. Left out on the answer, which has none. */
     result?: number;
+    /** What the calls are, when that is worth saying: "the program". */
+    what?: string;
   }
-  let { flow, result }: Props = $props();
+  let { flow, result, what }: Props = $props();
 
   const answer = $derived(flow.calls === 0);
 </script>
 
-<p class="flow" aria-label="This turn: what the model read, what it wrote, and what came back">
+<p class="flow" role="group" aria-label="This turn: what the model read, what it wrote, and what came back">
   <span class="cell">
     <Tip class="k" text={INPUT_TIP}>Input</Tip>
     <b>{fmtTokens(flow.input)}</b>
@@ -33,6 +35,8 @@
     <b>{fmtTokens(flow.output)}</b>
     {#if answer}
       <span class="d">the answer</span>
+    {:else if what}
+      <span class="d">{what}</span>
     {:else if flow.calls > 1}
       <span class="d">{flow.calls} calls</span>
     {/if}
