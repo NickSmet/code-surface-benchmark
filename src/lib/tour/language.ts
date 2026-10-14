@@ -1,16 +1,16 @@
 /**
- * Screen ③: how a tool catalogue grows into a query language.
+ * Screen ④: how a tool catalogue grows into a query language.
  *
  * Two things live here.
  *
  * 1. The ladder. The same question (the benchmark's aggregate task) put to
- *    seven tool designs, from "one tool per property" up to "write code".
+ *    eight tool designs, from "one tool per property" up to "write code".
  *    Every rung is a real set of tool definitions over the real estate; a
  *    scripted model drives it and the replay bills the tokens exactly the way
- *    the other screens do. Rungs 1-4 and 6 are designs written for the tour;
- *    rung 5 uses the benchmark's own `list_resources`; rung 7 is the
- *    benchmark's code surface.
- * 2. The language. Rung 6 is a small, working query language (filter, group,
+ *    the other screens do. Rungs 1-4, 6 and 7 are designs written for the
+ *    tour; rung 5 uses the benchmark's own `list_resources`, and rung 6 adds a
+ *    calculator to it; rung 8 is the benchmark's code surface.
+ * 2. The language. Rung 7 is a small, working query language (filter, group,
  *    aggregate, project, page). Four optional features can be added to it
  *    (computed values, following references, updates, batching). Each one makes
  *    the tool definition longer and covers more tasks, and a handful of fresh
@@ -167,7 +167,116 @@ function vmDispatch(inv: Inventory, rung: 'per-property' | 'one-tool' | 'aspect'
   };
 }
 
-// ── rung 6: the query language ─────────────────────────────────────────────
+// ── rungs 5 and 6: filtering across resources, and a calculator on top ─────
+
+/** The benchmark's own list and get, over a private copy of the estate. */
+function listingDispatch(inv: Inventory): SimSurface['dispatch'] {
+  return (name, args) => {
+    if (name === 'list_resources') {
+      const out = listResources(inv, args as { type?: string; resourceGroup?: string; subscriptionName?: string });
+      return ok(out, `${out.count} resources`);
+    }
+    if (name === 'get_resource') return ok(getResource(inv, args as { name?: string }), String(args.name));
+    return fail(`Unknown tool ${name}`);
+  };
+}
+
+export type Calculation = { ok: true; value: number } | { ok: false; error: string };
+
+/**
+ * What a calculator tool does: numbers, + - * / and parentheses. It parses the
+ * text, so nothing but arithmetic can run. The result is rounded to six places
+ * so that adding cents does not come back as 1234.5600000000001.
+ */
+export function evaluateExpression(source: string): Calculation {
+  let at = 0;
+  const skip = (): void => {
+    while (at < source.length && /\s/.test(source[at])) at += 1;
+  };
+  const peek = (): string | undefined => {
+    skip();
+    return source[at];
+  };
+  const stop = (message: string): never => {
+    throw new Error(message);
+  };
+  const number = (): number => {
+    skip();
+    const m = /^(?:\d+(?:\.\d+)?|\.\d+)/.exec(source.slice(at));
+    if (!m) return stop(at >= source.length ? 'The expression ends where a number should be.' : `Expected a number at position ${at + 1}, found "${source[at]}".`);
+    at += m[0].length;
+    return Number(m[0]);
+  };
+  const factor = (): number => {
+    const c = peek();
+    if (c === '(') {
+      at += 1;
+      const inner = sum();
+      if (peek() !== ')') stop('A parenthesis is not closed.');
+      at += 1;
+      return inner;
+    }
+    if (c === '-') {
+      at += 1;
+      return -factor();
+    }
+    return number();
+  };
+  const product = (): number => {
+    let v = factor();
+    for (;;) {
+      const c = peek();
+      if (c === '*') {
+        at += 1;
+        v *= factor();
+      } else if (c === '/') {
+        at += 1;
+        const d = factor();
+        if (d === 0) stop('Division by zero.');
+        v /= d;
+      } else return v;
+    }
+  };
+  const sum = (): number => {
+    let v = product();
+    for (;;) {
+      const c = peek();
+      if (c === '+') {
+        at += 1;
+        v += product();
+      } else if (c === '-') {
+        at += 1;
+        v -= product();
+      } else return v;
+    }
+  };
+  try {
+    const value = sum();
+    if (peek() !== undefined) stop(`Unexpected "${source[at]}" at position ${at + 1}.`);
+    return { ok: true, value: Math.round(value * 1e6) / 1e6 };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+const calculatorTool = fn(
+  'calculate',
+  'Evaluate an arithmetic expression and return the result. Numbers, + - * / and parentheses, for example "12.5 + 30.1".',
+  { expression: { type: 'string', description: 'The expression to evaluate.' } },
+  ['expression']
+);
+const calculatorTools: ToolSchema[] = [...filterTools, calculatorTool];
+
+function calculatorDispatch(inv: Inventory): SimSurface['dispatch'] {
+  const listing = listingDispatch(inv);
+  return (name, args) => {
+    if (name !== 'calculate') return listing(name, args);
+    const out = evaluateExpression(typeof args.expression === 'string' ? args.expression : '');
+    return out.ok ? ok({ result: out.value }, String(out.value)) : fail(out.error);
+  };
+}
+
+// ── rung 7: the query language ─────────────────────────────────────────────
 
 export type FeatureId = 'compute' | 'join' | 'update' | 'batch';
 
@@ -611,7 +720,7 @@ const PROD_RUNNING = [
 type Listed = { vms: Array<{ name: string; resourceGroup: string }> };
 type Fact = { name: string; resourceGroup: string; powerState?: string; costMonthly?: number; tags?: Record<string, string>; tagCount?: number };
 
-export type RungId = 'per-property' | 'one-tool' | 'aspect' | 'aspects' | 'filter' | 'query' | 'code';
+export type RungId = 'per-property' | 'one-tool' | 'aspect' | 'aspects' | 'filter' | 'calculator' | 'query' | 'code';
 
 export interface Rung {
   id: RungId;
@@ -633,7 +742,7 @@ function surfaceFor(inv: Inventory, id: string, label: string, tools: ToolSchema
   return { id, label, systemPrompt: ladderPrompt(inv.generatedAt), tools, inventory: inv, dispatch };
 }
 
-function scripts(): Record<'per-property' | 'one-tool' | 'aspect' | 'aspects' | 'filter' | 'query', (api: ScriptApi) => string> {
+function scripts(): Record<Exclude<RungId, 'code'>, (api: ScriptApi) => string> {
   const call = (api: ScriptApi, name: string, args: Record<string, unknown>) => api.call(name, args);
   return {
     'per-property': (api) => {
@@ -680,6 +789,25 @@ function scripts(): Record<'per-property' | 'one-tool' | 'aspect' | 'aspects' | 
         list.resources.filter((v) => v.powerState === 'running').map((v) => ({ name: v.name, group: v.resourceGroup, cost: v.costMonthly ?? 0, untagged: v.tagCount === 0 }))
       );
     },
+    // The same list, but the sums go through the calculator. It cannot see the estate, so every cost the
+    // question needs is copied into a call: once for its resource group's sum, once for the total.
+    calculator: (api) => {
+      const list = call(api, 'list_resources', { type: 'virtualMachine', subscriptionName: PROD }) as { resources: Fact[] };
+      const running = list.resources.filter((v) => v.powerState === 'running');
+      const groups = [...new Set(running.map((v) => v.resourceGroup))];
+      const plus = (vms: Fact[]): string => vms.map((v) => v.costMonthly ?? 0).join(' + ');
+      const sums = api.parallel<{ result: number }>([
+        ...groups.map((g) => ['calculate', { expression: plus(running.filter((v) => v.resourceGroup === g)) }] as const),
+        ['calculate', { expression: plus(running) }]
+      ]);
+      const cents = (n: number): number => Math.round(n * 100) / 100;
+      return formatAnswer({
+        task: 'filter-aggregate',
+        byResourceGroup: Object.fromEntries(groups.map((g, i) => [g, cents(sums[i].result)])),
+        total: cents(sums[groups.length].result),
+        untagged: running.filter((v) => v.tagCount === 0).map((v) => v.name)
+      });
+    },
     query: (api) => {
       const [sums, bare] = api.parallel<{ rows: Row[] }>([
         ['query_resources', { from: 'resources', where: PROD_RUNNING, groupBy: ['resourceGroup'], aggregate: [{ fn: 'sum', field: 'costMonthly', as: 'total' }] }],
@@ -699,18 +827,19 @@ const PRESSURE: Record<RungId, string> = {
   aspect: 'Now the agent can ask for a slice. But the schema has grown, and a question that spans two aspects still takes two calls. So you make it an array.',
   aspects: 'Fewer round trips. But the tool still answers about one VM at a time, so the agent has to visit every VM. So you add filtering across VMs.',
   filter:
-    'This works when the summary happens to carry what the question needs. Then the requirements grow: grouped results, aggregation, only some fields, pages of results.',
+    'One call, because the summary happens to carry what the question needs. But the model adds the figures itself, by inference, and nothing checks the sum. So you give it a calculator.',
+  calculator:
+    'The sums are exact now. But the calculator cannot see the estate: the model reads each figure, writes it back into a call, and still does the grouping itself. So the arithmetic moves next to the data, and the filter grows to cover grouped results, aggregation, only some fields and pages of results.',
   query:
     'You have built a query language. It was not designed as one: its syntax lives in the schema and its semantics in prose, and every new kind of question needs another feature.',
   code: 'Instead of adding expressive power to a JSON interface, expose the objects and let the model express the operation in code. Filter, map, group, join and aggregate are operations it already knows.'
 };
 
 /**
- * One question on seven tool designs. `codeReplay` is the code surface's run
- * of the same question (see `compareSurfaces`), since it needs the reference
- * program, which the page loads.
+ * Rungs 1-7: the question put to seven designs of tool. None of them needs the
+ * code surface, so a screen that only wants the tools can stop here.
  */
-export function buildLadder(inv: Inventory, codeReplay: Replay): Rung[] {
+export function buildToolRungs(inv: Inventory): Rung[] {
   const task = 'Across the Production subscription, what is the total estimated monthly cost of all VMs that are currently running, broken down by resource group? Also list any of those running VMs that have no tags.';
   const run = scripts();
   const mk = (
@@ -735,33 +864,30 @@ export function buildLadder(inv: Inventory, codeReplay: Replay): Rung[] {
     };
   };
   const fresh = (): Inventory => structuredClone(inv);
-  const filterInv = fresh();
   const none = new Set<FeatureId>();
   const qTool = queryTool(none);
-  const rungs: Rung[] = [
+  return [
     mk('per-property', 1, 'One tool per property', 'get_vm_power_state(name) \u00b7 get_vm_cost_monthly(name) \u00b7 get_vm_tags(name) \u00b7 \u2026 \u00d714', perPropertyTools, vmDispatch(fresh(), 'per-property')),
     mk('one-tool', 2, 'One tool, every property', 'get_vm_properties(name)', oneToolTools, vmDispatch(fresh(), 'one-tool')),
     mk('aspect', 3, 'An aspect parameter', 'get_vm_properties(name, aspect)', aspectTools, vmDispatch(fresh(), 'aspect')),
     mk('aspects', 4, 'An array of aspects', 'get_vm_properties(name, aspects[])', aspectsTools, vmDispatch(fresh(), 'aspects')),
-    mk(
-      'filter',
-      5,
-      'Filtering across VMs',
-      'list_resources(type, resourceGroup, subscriptionName) \u00b7 get_resource(name)',
-      filterTools,
-      (name, args) => {
-        if (name === 'list_resources') {
-          const out = listResources(filterInv, args as { type?: string; resourceGroup?: string; subscriptionName?: string });
-          return ok(out, `${out.count} resources`);
-        }
-        if (name === 'get_resource') return ok(getResource(filterInv, args as { name?: string }), String(args.name));
-        return fail(`Unknown tool ${name}`);
-      }
-    ),
-    mk('query', 6, 'A query language', 'query_resources({ from, where, groupBy, aggregate, select, orderBy, limit, offset })', [qTool], queryDispatch(fresh(), none)),
+    mk('filter', 5, 'Filtering across VMs', 'list_resources(type, resourceGroup, subscriptionName) \u00b7 get_resource(name)', filterTools, listingDispatch(fresh())),
+    mk('calculator', 6, 'A calculator', 'list_resources(\u2026) \u00b7 get_resource(name) \u00b7 calculate(expression)', calculatorTools, calculatorDispatch(fresh())),
+    mk('query', 7, 'A query language', 'query_resources({ from, where, groupBy, aggregate, select, orderBy, limit, offset })', [qTool], queryDispatch(fresh(), none))
+  ];
+}
+
+/**
+ * One question on eight tool designs. `codeReplay` is the code surface's run
+ * of the same question (see `compareSurfaces`), since it needs the reference
+ * program, which the page loads.
+ */
+export function buildLadder(inv: Inventory, codeReplay: Replay): Rung[] {
+  return [
+    ...buildToolRungs(inv),
     {
       id: 'code',
-      n: 7,
+      n: 8,
       title: 'Code over the object',
       signature: 'operate_inventory({ code })  \u2192  function main(data, ctx)',
       pressure: PRESSURE.code,
@@ -771,7 +897,6 @@ export function buildLadder(inv: Inventory, codeReplay: Replay): Rung[] {
       bill: runBill(codeReplay)
     }
   ];
-  return rungs;
 }
 
 /** Tokens of a tool definition, as the replay bills it. */
@@ -1026,6 +1151,15 @@ export function rungFacts(r: Rung): string[] {
       return [shape, 'One call per VM, but the agent cannot tell which VMs are running without asking about all of them.'];
     case 'filter':
       return [shape, 'One call, because the summary happens to carry the cost, tag count and power state this question needs.'];
+    case 'calculator': {
+      const sums = r.replay.calls.filter((c) => c.name === 'calculate');
+      const written = sums.reduce((n, c) => n + c.callTokens, 0);
+      const figures = sums.reduce((n, c) => n + String(c.args.expression).split('+').length, 0);
+      return [
+        shape,
+        `The calculator cannot see the estate, so the model copies ${plural(figures, 'figure')} into ${plural(sums.length, 'call')}: \u2248 ${fmtTokens(written)} tokens it has to write, of figures it had already read.`
+      ];
+    }
     case 'query':
       return [shape, `The cheapest bill here, because this is the kind of question the language was built for. Its definition is already \u2248 ${fmtTokens(r.setupTokens)} tokens per turn.`];
     case 'code':
