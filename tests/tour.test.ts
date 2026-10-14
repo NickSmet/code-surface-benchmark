@@ -19,7 +19,8 @@ import { readFileSync } from 'node:fs';
 import { runTracked } from '../src/lib/tour/code-run';
 import { CONTRACT_PROBES, TASK_ORDER, parseSolutionPrograms } from '../src/lib/tour/programs';
 import { codeTouches, replayCode } from '../src/lib/tour/code-compare';
-import { billedAt, callSummary, costFacts, lastFrame, stepBadge, turnAt } from '../src/lib/tour/replay-view';
+import { PART_KEYS, billedAt, callSummary, costFacts, lastFrame, promptSplit, stepBadge, turnAt } from '../src/lib/tour/replay-view';
+import { clipLines, isJson, prettyJson, tokenizeJson } from '../src/lib/tour/json-highlight';
 import { compareSurfaces, comparisonHeadline, comparisonLesson, groupDiff, outcomeCaption, probeResult, seenBy, splitBill } from '../src/lib/tour/code-view';
 import {
   FEATURES,
@@ -446,6 +447,98 @@ test('replay view: captions and badges describe what each call touched', () => {
   const lookup = replayCatalog({ task: 'single-lookup' });
   assert.equal(callSummary(lookup.calls[0], nameOf), '3 resource groups came back.');
   assert.equal(stepBadge(pod, marksAt([], 5)), null);
+});
+
+test('replay view: each request splits into what it repeats and what is new', () => {
+  const runs = [
+    replayCatalog({ task: 'granular-read' }),
+    replayCatalog({ task: 'filter-aggregate', route: 'survey' }),
+    replayCatalog({ task: 'filter-aggregate', route: 'survey', batchSize: 1 }),
+    replayCatalog({ task: 'bulk-write' }),
+    replayCatalog({ task: 'single-lookup' })
+  ];
+  const sum = (p: Record<(typeof PART_KEYS)[number], number>): number => PART_KEYS.reduce((n, k) => n + p[k], 0);
+  for (const r of runs) {
+    const fixed = r.turns[0].parts.system + r.turns[0].parts.tools;
+    r.turns.forEach((turn, i) => {
+      const s = promptSplit(r.turns, i);
+      const where = `${r.task}, turn ${turn.n}`;
+      // The numbers a reader sees must add up exactly: cached + new = what the turn sent.
+      assert.equal(s.cachedTokens + s.freshTokens, turn.promptTokens, `${where}: cached + new is the whole request`);
+      assert.equal(sum(s.cached), s.cachedTokens, `${where}: the cached parts add up to the cached total`);
+      assert.equal(sum(s.fresh), s.freshTokens, `${where}: the new parts add up to the new total`);
+      for (const k of PART_KEYS) assert.ok(s.cached[k] >= 0 && s.fresh[k] >= 0, `${where}: no negative part`);
+      if (i === 0) {
+        assert.equal(s.cachedTokens, 0, 'nothing has been sent before the first request');
+        assert.equal(s.fresh.calls + s.fresh.results, 0, 'the first request holds no calls yet');
+        assert.ok(Math.abs(s.fresh.fixed - fixed) <= PART_KEYS.length, 'the first request sends the instructions and tools for the first time');
+      } else {
+        assert.equal(s.cachedTokens, r.turns[i - 1].promptTokens, `${where}: what repeats is exactly the previous request`);
+        assert.ok(Math.abs(s.cached.fixed - fixed) <= PART_KEYS.length, `${where}: instructions and tools repeat`);
+        assert.ok(Math.abs(s.cached.user - turn.parts.user) <= PART_KEYS.length, `${where}: the question repeats`);
+        assert.equal(s.fresh.fixed + s.fresh.user, 0, `${where}: only calls and results can be new`);
+        assert.ok(s.fresh.calls > 0 && s.fresh.results > 0, `${where}: the last turn added a call and its result`);
+      }
+    });
+  }
+  // With one call per turn, a request is the previous one plus exactly one call and its result.
+  const slow = runs[2];
+  assert.equal(slow.turns.length, 20);
+  const last = promptSplit(slow.turns, 19);
+  assert.ok(last.cachedTokens > 8 * last.freshTokens, 'late in a long run almost everything is repeated');
+});
+
+test('json view: tokens reassemble the text exactly and tell keys, strings, numbers and literals apart', () => {
+  const text = prettyJson('{"a":1,"b":[true,null,"x"],"c":{"d":-2.5,"e":"say \\"hi\\": now"}}');
+  const tokens = tokenizeJson(text);
+  assert.equal(tokens.map((t) => t.s).join(''), text);
+  const kindOf = (s: string) => tokens.find((t) => t.s.trim() === s)?.k;
+  assert.equal(kindOf('"a"'), 'key');
+  assert.equal(kindOf('"d"'), 'key');
+  assert.equal(kindOf('1'), 'num');
+  assert.equal(kindOf('-2.5'), 'num');
+  assert.deepEqual(
+    tokenizeJson('[1e5, -2.5E-3, 0.5]').filter((t) => t.k === 'num').map((t) => t.s.trim()),
+    ['1e5', '-2.5E-3', '0.5'],
+    'exponents are numbers too'
+  );
+  assert.equal(kindOf('true'), 'lit');
+  assert.equal(kindOf('null'), 'lit');
+  assert.equal(kindOf('"x"'), 'str');
+  assert.equal(kindOf('"say \\"hi\\": now"'), 'str', 'a colon inside a string does not make it a key');
+  assert.equal(tokens.filter((t) => t.k === 'key').length, 5);
+
+  // Anything at all comes back whole, even text that is not JSON.
+  for (const raw of ['', '   ', 'Error: resource not found', '{"a": "unterminated', '[1, 2,', '\u2026 12 more characters', '"\\']) {
+    assert.equal(tokenizeJson(raw).map((t) => t.s).join(''), raw, JSON.stringify(raw));
+  }
+  assert.equal(isJson('{"a":1}'), true);
+  assert.equal(isJson('Error: resource not found'), false);
+  assert.equal(prettyJson('Error: resource not found'), 'Error: resource not found');
+  assert.equal(prettyJson('{"a":[1]}'), '{\n  "a": [\n    1\n  ]\n}');
+});
+
+test('json view: every real tool result reassembles, and long ones are clipped to whole lines', () => {
+  let longest = '';
+  for (const r of [replayCatalog({ task: 'granular-read' }), replayCatalog({ task: 'filter-aggregate', route: 'survey' }), replayCatalog({ task: 'bulk-write' })]) {
+    for (const c of r.calls) {
+      const shown = prettyJson(c.content);
+      assert.equal(tokenizeJson(shown).map((t) => t.s).join(''), shown, `${r.task} step ${c.step}`);
+      if (shown.length > longest.length) longest = shown;
+    }
+  }
+  const lines = longest.split('\n').length;
+  assert.ok(lines > 1500, 'the whole-estate listing is well over a thousand lines');
+  const clip = clipLines(longest, 200);
+  assert.equal(clip.text.split('\n').length, 200);
+  assert.equal(clip.more, lines - 200);
+  assert.equal(clip.text, longest.split('\n').slice(0, 200).join('\n'));
+
+  assert.deepEqual(clipLines('a\nb\nc', 2), { text: 'a\nb', more: 1 });
+  assert.deepEqual(clipLines('a\nb\nc', 1), { text: 'a', more: 2 });
+  assert.deepEqual(clipLines('a\nb', 5), { text: 'a\nb', more: 0 });
+  assert.deepEqual(clipLines('one line', 3), { text: 'one line', more: 0 });
+  assert.deepEqual(clipLines('a\nb', Infinity), { text: 'a\nb', more: 0 });
 });
 
 // ── code screen helpers ────────────────────────────────────────────────────

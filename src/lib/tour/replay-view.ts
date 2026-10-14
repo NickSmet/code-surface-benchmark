@@ -9,7 +9,7 @@
  */
 
 import type { EstateUnit } from './estate';
-import type { Replay, ReplayCall } from './replay';
+import type { Replay, ReplayCall, ReplayTurn } from './replay';
 import type { MarkSet } from './touch';
 
 /** Index of the last frame (the final answer). */
@@ -60,6 +60,60 @@ export function costFacts(replay: Replay): CostFacts {
     fixedBilled,
     fixedShare: t.billedTokens > 0 ? fixedBilled / t.billedTokens : 0
   };
+}
+
+/** What a request is made of, bottom to top as the chart stacks it. */
+export type PartKey = 'fixed' | 'user' | 'calls' | 'results';
+export const PART_KEYS: readonly PartKey[] = ['fixed', 'user', 'calls', 'results'];
+
+export interface PromptSplit {
+  /**
+   * Text that was already in the previous request, unchanged and in the same
+   * place. A provider with prompt caching can reuse it at a discount. The first
+   * request has none: nothing has been sent before.
+   */
+  cached: Record<PartKey, number>;
+  /** Text that is new in this request: the whole prompt the first time, then only what the last turn added. */
+  fresh: Record<PartKey, number>;
+  cachedTokens: number;
+  freshTokens: number;
+}
+
+/**
+ * Split request `index` into what it repeats from the request before and what is new.
+ *
+ * Every turn re-sends the instructions, the tool definitions, the question and
+ * everything that happened so far, and appends one thing: the previous turn's
+ * calls and their results. So from the second request on, only that tail is new.
+ * This is an accounting view, not a billing change: the replay's totals still
+ * assume no caching.
+ */
+export function promptSplit(turns: ReplayTurn[], index: number): PromptSplit {
+  const turn = turns[index];
+  const cur = turn.parts;
+  const prev = index > 0 ? turns[index - 1] : null;
+  const fixed = cur.system + cur.tools;
+  const cachedParts: Record<PartKey, number> = prev
+    ? { fixed, user: cur.user, calls: prev.parts.calls, results: prev.parts.results }
+    : { fixed: 0, user: 0, calls: 0, results: 0 };
+  const freshParts: Record<PartKey, number> = prev
+    ? { fixed: 0, user: 0, calls: Math.max(0, cur.calls - prev.parts.calls), results: Math.max(0, cur.results - prev.parts.results) }
+    : { fixed, user: cur.user, calls: cur.calls, results: cur.results };
+  // The previous request is, character for character, the start of this one. So what is
+  // cached is exactly that request's size, and what is new is exactly the difference.
+  const cachedTokens = prev ? prev.promptTokens : 0;
+  const freshTokens = turn.promptTokens - cachedTokens;
+  return { cached: settle(cachedParts, cachedTokens), fresh: settle(freshParts, freshTokens), cachedTokens, freshTokens };
+}
+
+/** Parts are each rounded up on their own, so they can overshoot the whole: the biggest absorbs the difference. */
+function settle(parts: Record<PartKey, number>, exact: number): Record<PartKey, number> {
+  const out = { ...parts };
+  const sum = PART_KEYS.reduce((n, k) => n + out[k], 0);
+  if (sum === exact) return out;
+  const big = PART_KEYS.reduce((a, b) => (out[b] > out[a] ? b : a));
+  out[big] = Math.max(0, out[big] + (exact - sum));
+  return out;
 }
 
 /** One plain sentence about what a call did to the estate. */
