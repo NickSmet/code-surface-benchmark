@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildInventory } from '../src/lib/inventory/fixtures/builders';
+import type { VirtualMachine } from '../src/lib/inventory/types';
 import { buildProjection, diffProjection } from '../src/lib/inventory/projection';
 import { computeGroundTruth } from '../src/lib/inventory/truth';
 import { sameChanges } from '../src/lib/bench-checks';
@@ -32,17 +33,22 @@ import {
   FEATURE_IDS,
   FRESH_QUESTIONS,
   buildLadder,
+  buildToolRungs,
   coverage,
   EXAMPLE_QUERIES,
   definitionTokens,
+  evaluateExpression,
   keywords,
+  planTask,
   rungFacts,
   queryContent,
   queryTool,
   runQuery,
   type FeatureId,
-  type QueryOut
+  type QueryOut,
+  type RungId
 } from '../src/lib/tour/language';
+import { buildStrains, strainLink } from '../src/lib/tour/strains';
 import {
   ACTS,
   AT,
@@ -512,7 +518,7 @@ function allCatalogRuns(): Array<{ label: string; task: TaskId; replay: Replay }
   return runs;
 }
 
-/** Every run the screens draw: the tools screen's nine, the seven rungs of the third, and each question on both surfaces of the fourth. */
+/** Every run the screens draw: the tools screen's nine, the eight rungs of the ladder, and each question on both surfaces of the code screen. */
 function allScreenRuns(): Array<{ label: string; replay: Replay }> {
   const runs = allCatalogRuns().map(({ label, replay }) => ({ label: `tools: ${label}`, replay }));
   const cmp = compareSurfaces('filter-aggregate', programs['filter-aggregate']);
@@ -696,7 +702,7 @@ test('billing audit: a turn in plain terms is what it read (cached + new) and wh
 
 test('billing audit: a whole run is what it read (repeated + new) plus what it wrote, for every run on every screen', () => {
   const runs = allScreenRuns();
-  assert.equal(runs.length, 9 + 7 + 8, runs.map((r) => r.label).join(' | '));
+  assert.equal(runs.length, 9 + 8 + 8, runs.map((r) => r.label).join(' | '));
   for (const { label, replay } of runs) {
     const b = runBill(replay);
     const last = replay.turns[replay.turns.length - 1];
@@ -947,33 +953,181 @@ test('code view: each lesson quotes the numbers it was computed from', () => {
   assert.match(one, /1,312 tokens of setup per turn, against \u2248 1,014/);
 });
 
-// ── screen 3: the ladder and the language ──────────────────────────────────
+// ── the ladder and the language ────────────────────────────────────────────
 const ALL = new Set<FeatureId>(FEATURE_IDS);
 const NONE = new Set<FeatureId>();
 const rowsOf = (o: QueryOut): Array<Record<string, unknown>> => (o.ok && o.kind === 'rows' ? o.rows : []);
 
-test('ladder: seven tool designs reach the same answer, and the three taxes show up where the article says', () => {
+test('ladder: eight tool designs reach the same answer, and the three taxes show up where the article says', () => {
   const cmp = compareSurfaces('filter-aggregate', programs['filter-aggregate']);
   const ladder = buildLadder(buildInventory(), cmp.code);
-  assert.equal(ladder.length, 7);
-  assert.deepEqual(ladder.map((r) => r.n), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(ladder.length, 8);
+  assert.deepEqual(ladder.map((r) => r.n), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(ladder.map((r) => r.id), ['per-property', 'one-tool', 'aspect', 'aspects', 'filter', 'calculator', 'query', 'code']);
   for (const r of ladder) assert.equal(r.replay.finalText, cmp.code.finalText, `${r.id}: same final sentence`);
 
-  // Round-trip tax: consolidating removes calls; the aspect parameter brings some back when a question spans two aspects.
-  assert.deepEqual(ladder.map((r) => r.replay.totals.calls), [58, 22, 40, 22, 1, 2, 1]);
+  // Round-trip tax: consolidating removes calls; the aspect parameter brings some back when a question spans two aspects,
+  // and the calculator adds the calls that carry the figures to it.
+  assert.deepEqual(ladder.map((r) => r.replay.totals.calls), [58, 22, 40, 22, 1, 5, 2, 1]);
   assert.ok(ladder[2].replay.totals.calls > ladder[1].replay.totals.calls);
 
   // Schema tax: after the one-tool rung, every rung's definitions are longer than the last.
   const setup = ladder.map((r) => r.setupTokens);
   assert.ok(setup[0] > setup[1], 'fourteen tools cost more than one');
-  for (let i = 2; i < 7; i++) assert.ok(setup[i] > setup[i - 1], `rung ${i + 1} defines more than rung ${i}`);
+  for (let i = 2; i < 8; i++) assert.ok(setup[i] > setup[i - 1], `rung ${i + 1} defines more than rung ${i}`);
 
-  // The honest part: the query language is the cheapest bill for the question it was built for.
+  // The honest part: the query language is the cheapest bill for the question it was built for, and a calculator
+  // makes the sums exact at a price: it bills more than the plain list.
   const billed = ladder.map((r) => r.replay.totals.billedTokens);
-  assert.equal(Math.min(...billed), billed[5]);
-  assert.ok(billed[5] < billed[6], 'the language beats code on its own question');
+  assert.equal(Math.min(...billed), billed[6]);
+  assert.ok(billed[6] < billed[7], 'the language beats code on its own question');
+  assert.ok(billed[5] > billed[4], 'the calculator costs more than the list it adds up');
   for (const r of ladder) assert.equal(r.bill.total, r.replay.totals.billedTokens, `${r.id}: the bar is the bill`);
-  assert.deepEqual(ladder[6].bill, runBill(cmp.code), 'the last rung is the very run the next screen compares');
+  assert.deepEqual(ladder[7].bill, runBill(cmp.code), 'the last rung is the very run the code screen compares');
+});
+
+test('the tool rungs are the ladder without the code rung, so a screen that only wants the tools does not run the program', () => {
+  const cmp = compareSurfaces('filter-aggregate', programs['filter-aggregate']);
+  const full = buildLadder(buildInventory(), cmp.code);
+  const tools = buildToolRungs(buildInventory());
+  assert.equal(tools.length, 7);
+  assert.deepEqual(tools.map((r) => [r.id, r.n, r.bill]), full.slice(0, 7).map((r) => [r.id, r.n, r.bill]));
+});
+
+test('calculator: the arithmetic of a tool that parses text, and fails with a message instead of guessing', () => {
+  const value = (s: string): number | string => {
+    const out = evaluateExpression(s);
+    return out.ok ? out.value : out.error;
+  };
+  assert.equal(value('12.5 + 30.1'), 42.6);
+  assert.equal(value('2 * (3 + 4)'), 14);
+  assert.equal(value('2 + 3 * 4'), 14, 'multiplication binds tighter than addition');
+  assert.equal(value('10 - 4 - 3'), 3, 'subtraction runs left to right');
+  assert.equal(value('-2 * 3'), -6);
+  assert.equal(value('.5 + .5'), 1);
+  assert.equal(value('0.1 + 0.2'), 0.3, 'adding cents does not come back as 0.30000000000000004');
+  assert.equal(value('1/4'), 0.25);
+  // Anything that is not arithmetic is refused, and says where.
+  assert.equal(value('1 / 0'), 'Division by zero.');
+  assert.equal(value('1 +'), 'The expression ends where a number should be.');
+  assert.equal(value('(1 + 2'), 'A parenthesis is not closed.');
+  assert.match(String(value('process.exit(1)')), /^Expected a number at position 1, found "p"\./);
+  assert.match(String(value('1 2')), /^Unexpected "2" at position 3\./);
+  assert.match(String(value('')), /ends where a number should be/);
+});
+
+test('calculator rung: every sum the model asks for is the sum of the costs the list returned, and every cost is copied in', () => {
+  const inv = buildInventory();
+  const calc = buildToolRungs(inv).find((r) => r.id === 'calculator')!;
+  const filter = buildToolRungs(inv).find((r) => r.id === 'filter')!;
+  const prod = inv.subscriptions.find((s) => s.name === 'Production')!.id;
+  const running = inv.resources.filter((r): r is VirtualMachine => r.type === 'virtualMachine' && r.subscriptionId === prod && r.powerState === 'running');
+  const groups = [...new Set(running.map((v) => v.resourceGroup))];
+  const sums = calc.replay.calls.filter((c) => c.name === 'calculate');
+  // One sum per resource group and one for the total, all in one turn after the list.
+  assert.equal(sums.length, groups.length + 1);
+  assert.deepEqual(calc.replay.turns.map((t) => t.calls.length), [1, sums.length, 0]);
+  assert.equal(calc.replay.totals.calls, 1 + sums.length);
+  // Each result is the sum of the costs in that call's own expression, to the cent.
+  for (const c of sums) {
+    const costs = String(c.args.expression).split('+').map((s) => Number(s));
+    assert.ok(costs.every(Number.isFinite), `${c.argsText} holds only numbers`);
+    assert.equal(JSON.parse(c.content).result, Math.round(costs.reduce((n, x) => n + x * 100, 0)) / 100);
+  }
+  // The costs it copies are the estate's: the group sums cover every running VM once, and the total covers them all.
+  const copied = sums.slice(0, groups.length).flatMap((c) => String(c.args.expression).split('+').map(Number));
+  assert.deepEqual([...copied].sort((a, b) => a - b), running.map((v) => v.costMonthly).sort((a, b) => a - b));
+  assert.equal(String(sums[groups.length].args.expression).split('+').length, running.length);
+  // And the price of it: more calls, one more turn, and a bigger bill than the plain list, for the same sentence.
+  assert.ok(calc.replay.totals.turns > filter.replay.totals.turns);
+  assert.ok(calc.bill.total > filter.bill.total);
+  assert.ok(calc.bill.output > filter.bill.output, 'the figures are written out');
+  assert.equal(calc.replay.finalText, filter.replay.finalText);
+  assert.deepEqual(calc.tools.map((t) => t.function.name), ['list_resources', 'get_resource', 'calculate']);
+});
+
+// ── where the naive tools strain ───────────────────────────────────────────
+
+test('strains: five scenarios, each the tools screen\'s own replay, and what each says is its shape', () => {
+  const inv = buildInventory();
+  const rows = buildStrains(inv, buildToolRungs(inv));
+  assert.deepEqual(rows.map((r) => r.id), ['chain', 'arithmetic', 'fan-out', 'recital', 'fits']);
+  for (const r of rows) {
+    assert.ok(CATALOG_ROUTES[r.task].some((x) => x.id === r.route && x.label === r.title), `${r.id}: a route the tools screen has, under its name`);
+    assert.deepEqual(r.bill, runBill(replayCatalog({ task: r.task, route: r.route })), `${r.id}: the bill is the tools screen's`);
+    assert.equal(r.calls, r.replay.totals.calls);
+    assert.equal(r.rounds, r.replay.turns.filter((t) => t.calls.length > 0).length);
+    assert.equal(r.widest, Math.max(...r.replay.turns.map((t) => t.calls.length)));
+  }
+  const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+  // A chain is calls one to a turn; a fan-out is many calls in one turn; one list and one lookup is neither.
+  assert.deepEqual([by.chain.calls, by.chain.rounds, by.chain.widest], [3, 3, 1]);
+  assert.deepEqual([by.arithmetic.calls, by.arithmetic.rounds, by.arithmetic.widest], [1, 1, 1]);
+  assert.ok(by['fan-out'].widest > 1 && by['fan-out'].rounds === 2);
+  assert.ok(by.recital.widest > 1 && by.recital.rounds === 2);
+  assert.deepEqual([by.fits.calls, by.fits.rounds], [1, 1]);
+  // The same question on two routes is the same question: one row is the best case, the other the cautious one.
+  assert.equal(by.arithmetic.task, by['fan-out'].task);
+  assert.ok(by['fan-out'].calls > by.arithmetic.calls);
+  assert.equal(by.fits.fix, null, 'a narrow tool has nothing to fix');
+  for (const id of ['chain', 'arithmetic', 'fan-out', 'recital'] as const) assert.ok(by[id].fix && by[id].fix.adds && by[id].fix.cta, `${id} has a fix`);
+});
+
+test('strains: every number in the copy is read off the replay, the estate or the plan it is about', () => {
+  const inv = buildInventory();
+  const rungs = buildToolRungs(inv);
+  const by = Object.fromEntries(buildStrains(inv, rungs).map((r) => [r.id, r]));
+  const prod = inv.subscriptions.find((s) => s.name === 'Production')!.id;
+  const vms = inv.resources.filter((r): r is VirtualMachine => r.type === 'virtualMachine' && r.subscriptionId === prod);
+  const running = vms.filter((v) => v.powerState === 'running');
+  const rung = (id: RungId) => rungs.find((r) => r.id === id)!;
+
+  assert.ok(by.chain.strain.text.startsWith(`${by.chain.calls} calls, one to a turn:`), by.chain.strain.text);
+  assert.ok(by.arithmetic.strain.text.includes(`lists ${vms.length} VMs, ${running.length} of them running`), by.arithmetic.strain.text);
+  assert.ok(
+    by['fan-out'].strain.text.startsWith(`${by['fan-out'].calls} calls: a list, then a lookup for each of the ${running.length} running VMs.`),
+    by['fan-out'].strain.text
+  );
+  assert.ok(by['fan-out'].strain.text.includes(`did the same job in ${by.arithmetic.calls} call,`), 'the contrast quotes the other route');
+  const writes = by.recital.replay.calls.filter((c) => c.name !== 'list_resources');
+  const listed = by.recital.replay.calls[0].resultSentTokens;
+  const spelled = writes.reduce((n, c) => n + c.callTokens, 0);
+  assert.ok(by.recital.strain.text.startsWith(`${by.recital.calls} calls: a ${fmtTokens(listed)}-token list, then ${writes.length} single-resource writes.`), by.recital.strain.text);
+  assert.ok(by.recital.strain.text.includes(`\u2248 ${fmtTokens(spelled)} tokens of calls`), by.recital.strain.text);
+  assert.equal(by.recital.calls, 1 + writes.length);
+  assert.equal(by.fits.strain.text, `1 call, ${fmtTokens(by.fits.replay.calls[0].resultSentTokens)} tokens back. The tool does exactly what the question asks.`);
+
+  // The fixes quote the plans and the rungs they point at.
+  const joined = planTask('granular-read', new Set<FeatureId>(['join']), buildInventory());
+  assert.ok(joined.ok && joined.calls === 1);
+  assert.ok(by.chain.fix!.text.includes(`${joined.calls} call, not ${by.chain.calls}`), by.chain.fix!.text);
+  assert.ok(
+    by.arithmetic.fix!.text.endsWith(`\u2248 ${fmtTokens(rung('calculator').bill.total)} tokens read and written, against \u2248 ${fmtTokens(rung('filter').bill.total)}.`),
+    by.arithmetic.fix!.text
+  );
+  assert.ok(by['fan-out'].fix!.text.includes(`from ${rung('per-property').replay.totals.calls} calls to ${rung('filter').replay.totals.calls}.`), by['fan-out'].fix!.text);
+  const edited = planTask('bulk-write', new Set<FeatureId>(['update']), buildInventory());
+  assert.ok(edited.ok);
+  assert.ok(by.recital.fix!.text.endsWith(`takes ${edited.calls} calls, not ${by.recital.calls}.`), by.recital.fix!.text);
+});
+
+test('strains: every fix links to a rung or a feature the language screen really has', () => {
+  const inv = buildInventory();
+  const rungIds = new Set<string>(buildToolRungs(inv).map((r) => r.id));
+  for (const r of buildStrains(inv, buildToolRungs(inv))) {
+    if (!r.fix) continue;
+    const url = new URL(r.fix.href, 'http://tour.test');
+    assert.equal(url.pathname, '/tour/language', `${r.id}: the language screen`);
+    const rung = url.searchParams.get('rung');
+    if (rung) assert.ok(rungIds.has(rung) || rung === 'code', `${r.id}: rung ${rung} exists`);
+    const features = (url.searchParams.get('f') ?? '').split(',').filter(Boolean);
+    for (const f of features) assert.ok(FEATURE_IDS.includes(f as FeatureId), `${r.id}: feature ${f} exists`);
+    // A feature is switched on in the section that grows the language, so the link lands there.
+    if (features.length) assert.equal(url.hash, '#grow', `${r.id}: the feature is shown where it is switched on`);
+  }
+  assert.equal(strainLink(null), '/tour/language');
+  assert.equal(strainLink('calculator'), '/tour/language?rung=calculator');
+  assert.equal(strainLink('query', ['join', 'update'], true), '/tour/language?rung=query&f=join,update#grow');
 });
 
 test('query language: filter, group, aggregate, project, order and page behave like the data says', () => {
@@ -1191,8 +1345,14 @@ test('ladder facts quote the replay, and every example query runs once the featu
   assert.ok(facts[1][1].includes(`each of its results is \u2248 ${mean} tokens`), 'the fact quotes the mean of the lookups the call list shows');
   assert.equal(fmtTokens(ladder[0].bill.total), '11.2k', 'the bill the row shows is the one the bar draws');
   assert.match(facts[4][0], /^1 call over 2 turns/);
-  assert.match(facts[5][1], /^The cheapest bill here/);
-  assert.match(facts[6][1], /1,312 tokens of setup per turn/);
+  // The calculator's figures are counted in the calls the replay holds, not typed in.
+  const calcCalls = ladder[5].replay.calls.filter((c) => c.name === 'calculate');
+  const figures = calcCalls.reduce((n, c) => n + String(c.args.expression).split('+').length, 0);
+  const written = calcCalls.reduce((n, c) => n + c.callTokens, 0);
+  assert.equal(facts[5][0], `${ladder[5].replay.totals.calls} calls over ${ladder[5].replay.totals.turns} turns.`);
+  assert.ok(facts[5][1].includes(`copies ${figures} figures into ${calcCalls.length} calls: \u2248 ${fmtTokens(written)} tokens`), facts[5][1]);
+  assert.match(facts[6][1], /^The cheapest bill here/);
+  assert.match(facts[7][1], /1,312 tokens of setup per turn/);
 
   const inv = buildInventory();
   const needs: Record<string, FeatureId[]> = { cost: [], groups: [], ip: ['join'], tag: ['update'], idle: ['compute'] };

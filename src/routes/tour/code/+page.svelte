@@ -320,7 +320,7 @@
 
 <header class="head">
   <div class="head-text">
-    <p class="t-kicker">⑤ Code surface</p>
+    <p class="t-kicker">⑥ Code surface</p>
     <h1 class="t-h1">One object. The model writes the program.</h1>
     <p class="t-lead">
       The object from the last screen, with all four questions. The model writes a few lines against it, the runtime runs them where the data lives, and only the answer travels back.

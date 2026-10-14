@@ -6,6 +6,7 @@
   const steps = [
     { href: '/tour/estate', title: 'The estate', hint: '194 things, many ways to look' },
     { href: '/tour/tools', title: 'Naive tools', hint: 'One call at a time' },
+    { href: '/tour/strains', title: 'Where it strains', hint: 'Each question strains the tools somewhere else' },
     { href: '/tour/language', title: 'A language', hint: 'The catalogue grows up' },
     { href: '/tour/object', title: 'The object', hint: 'Reshape the estate into plain data' },
     { href: '/tour/code', title: 'Code surface', hint: 'Programs over the object' }
@@ -168,7 +169,21 @@
       display: none;
     }
   }
-  @media (max-width: 960px) {
+  /* Six steps need about 1260px at full size. Tighter pills and joints carry them down to about 1210px. Below 1250px, with room to spare for other fonts, the steps get a row of their own. */
+  @media (max-width: 1300px) {
+    .steps {
+      gap: 2px;
+    }
+    .step + .step::before {
+      width: 8px;
+      margin-right: 2px;
+    }
+    .step a {
+      gap: 6px;
+      padding-right: 8px;
+    }
+  }
+  @media (max-width: 1250px) {
     .tour-top {
       height: auto;
       flex-wrap: wrap;

@@ -83,7 +83,9 @@
   };
 
   /** What to add to the story at the rungs where the bill alone would mislead. */
+  const billOf = (id: RungId): string => fmtTokens(ladder.find((r) => r.id === id)!.bill.total);
   const AFTER: Partial<Record<RungId, string>> = {
+    calculator: `The sums are exact, and it bills \u2248 ${billOf('calculator')} tokens against \u2248 ${billOf('filter')} for the plain list: one more turn reads the whole list again, and the figures are written out.`,
     query: 'It is the cheapest row for this question because this is the question it was built for. What happens when the questions change is below.',
     code: 'Its bill is higher than the query language here. What that buys is below.'
   };
@@ -247,10 +249,10 @@
 
 <header class="head">
   <div class="head-text">
-    <p class="t-kicker">③ A catalogue that grows a language</p>
+    <p class="t-kicker">④ A catalogue that grows a language</p>
     <h1 class="t-h1">Every fix adds vocabulary.</h1>
     <p class="t-lead">
-      Push a tool catalogue to answer more in fewer calls and it grows, one parameter at a time, into a query language. Here is one question put to seven tool designs. All seven reach the same answer.
+      Push a tool catalogue to answer more in fewer calls and it grows, one parameter at a time, into a query language. Here is one question put to eight tool designs. All eight reach the same answer.
     </p>
   </div>
   <section class="t-panel t-panel-pad ask" aria-label="The question">
@@ -259,7 +261,7 @@
   </section>
 </header>
 
-<section class="t-panel t-panel-pad ladder-panel" aria-label="Seven tool designs">
+<section class="t-panel t-panel-pad ladder-panel" aria-label="Eight tool designs">
   <div class="cols">
     <span aria-hidden="true"></span>
     <span class="c-name" aria-hidden="true">Tool design</span>
@@ -402,7 +404,7 @@
     <div>
       <h2 class="t-h2">Grow the language</h2>
       <p class="l-lead">
-        This is rung 6, working. Every feature below is one more thing the model has to be told, and one more thing somebody has to build and keep correct.
+        This is rung {ladder.find((r) => r.id === 'query')?.n}, working. Every feature below is one more thing the model has to be told, and one more thing somebody has to build and keep correct.
       </p>
     </div>
     <div class="l-tiles">
@@ -573,7 +575,7 @@
   </p>
 </section>
 
-<TourNav prev={{ href: '/tour/tools', label: 'Naive tools' }} next={{ href: '/tour/object', label: 'Reshape the estate into an object' }} />
+<TourNav prev={{ href: '/tour/strains', label: 'Where it strains' }} next={{ href: '/tour/object', label: 'Reshape the estate into an object' }} />
 
 <style>
   .head {
