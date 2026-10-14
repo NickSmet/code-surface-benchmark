@@ -466,7 +466,8 @@
           <p>
             Pre-recorded, not a live model. Every tool result is the real output of the benchmark&rsquo;s catalogue over this estate, and tokens are counted the way the benchmark counts them:
             characters &divide; 4, and every turn reads the whole conversation again. The totals are tokens, not dollars, and count cached text (grey) at full price; providers usually bill it
-            at about a tenth, and bill output at a higher rate than input. The scripts are idealised: they add the numbers exactly, where live models got the two hard tasks wrong.
+            at about a tenth, and bill output at a higher rate than input. The scripts are idealised: they add the numbers exactly, where a live model does it in its head. How often that goes
+            wrong depends on the model; the Results screen has the measured runs.
           </p>
         </details>
       </div>

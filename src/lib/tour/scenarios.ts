@@ -4,8 +4,9 @@
  * Each route is a small script that stands in for the model's decisions;
  * the tool results are real (see catalog-sim.ts). Routes are *idealised*:
  * where a live model has to add numbers or compare dates in prose, the
- * script computes them exactly. The benchmark's real catalogue runs got
- * those wrong on the two hard tasks; this tour deliberately shows the
+ * script computes them exactly. How often a live model gets those wrong
+ * depends on the model (the Results screen has the measured runs, and
+ * nothing on this screen claims a rate); this tour deliberately shows the
  * catalogue at its best, so the cost it still pays is the structural part.
  */
 
@@ -58,7 +59,7 @@ const aggregateBroad: CatalogRoute = {
   id: 'broad',
   label: 'Broad list',
   hint: 'Best case: one list call returns exactly what the question needs.',
-  lesson: 'One well-designed list call is enough. Then the model adds the figures in prose, and in the benchmark it was off by 5\u201311% every time.',
+  lesson: 'One well-designed list call is enough. Then the model adds the figures in prose, and nothing checks the sum.',
   script: (api) => {
     const out = api.call<Listing>('list_resources', { type: 'virtualMachine', subscriptionName: 'Production' });
     const running = out.resources.filter((r) => r.powerState === 'running');
@@ -71,7 +72,7 @@ const aggregateSurvey: CatalogRoute = {
   id: 'survey',
   label: 'Verify each VM',
   hint: 'Cautious: list first, then fetch every running VM to double-check.',
-  lesson: 'Same question, cautious route: list, then fetch each running VM. Benchmark runs ranged from 1 to 19 calls, so the bill swung by 60%.',
+  lesson: 'Same question, cautious route: list, then fetch each running VM. The catalogue allows both routes, so the bill follows the one the model picks.',
   script: (api) => {
     const out = api.call<Listing>('list_resources', { type: 'virtualMachine', subscriptionName: 'Production' });
     const running = out.resources.filter((r) => r.powerState === 'running');

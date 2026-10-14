@@ -21,8 +21,8 @@ import { needleFor } from '../src/lib/tour/needles';
 import { countMarks, dominantKind, marksAt } from '../src/lib/tour/touch';
 import { estimateTokens, fmtTokens } from '../src/lib/tour/tokens';
 import { factsFromCodeResult, formatAnswer, type TaskId } from '../src/lib/tour/answers';
-import { readFileSync } from 'node:fs';
-import { runTracked } from '../src/lib/tour/code-run';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { failedOutcome, runTracked } from '../src/lib/tour/code-run';
 import { CONTRACT_PROBES, TASK_ORDER, parseSolutionPrograms } from '../src/lib/tour/programs';
 import { codeTouches, replayCode } from '../src/lib/tour/code-compare';
 import { PART_KEYS, billedAt, billedSplit, callSummary, costFacts, lastFrame, promptSplit, runBill, stepBadge, turnAt, turnFlow, turnResultTokens } from '../src/lib/tour/replay-view';
@@ -48,7 +48,8 @@ import {
   type QueryOut,
   type RungId
 } from '../src/lib/tour/language';
-import { buildStrains, strainLink } from '../src/lib/tour/strains';
+import { ORIGIN, buildStrains, strainLink, withOrigin } from '../src/lib/tour/strains';
+import { QUERY_KEYS, buildBeats, buildStages, describeQuery, pickFields, shortIds, showArgs, solvedRows } from '../src/lib/tour/strain-stage';
 import {
   ACTS,
   AT,
@@ -89,6 +90,70 @@ import {
   type StepId
 } from '../src/lib/tour/object-stage';
 import { contractExcerpt, programBlocks, shapeForDisplay, stepCopy, tokenizeLine, traceAccess, type CopyFacts } from '../src/lib/tour/object-trace';
+import {
+  CODE,
+  GROUPS,
+  METHODS,
+  MODELS,
+  NEXT_LABEL,
+  OTHERS,
+  REPORTED,
+  RESULTS,
+  RESULTS_BEATS,
+  SOURCE,
+  buildResults,
+  cellOf,
+  cheapest,
+  codeSpan,
+  fmtTimes,
+  fmtUsd,
+  hostedSpan,
+  multiples,
+  nextCheapest,
+  othersSpan,
+  parseResultsBeat,
+  perThousandRight,
+  resultsHref,
+  type ArmId,
+  type ModelKey,
+  type ResultsBeatId
+} from '../src/lib/tour/results';
+import {
+  ANSWER_WIDTH,
+  BREAK_START,
+  EXAMPLES,
+  LAYER_LINE,
+  MAX_ANSWER_LINES,
+  PHASE_U,
+  REVIEW_ROWS,
+  U_START,
+  answerAt,
+  answerCard,
+  answerItems,
+  bandsOf,
+  billStrip,
+  bodyBand,
+  buildExample,
+  chromeAt,
+  defOf,
+  displayLines,
+  exampleBeats,
+  exampleHref,
+  freshOf,
+  lineAlpha,
+  lineHeightFor,
+  parseExampleState,
+  probeFor,
+  probesOf,
+  retBand,
+  reviewAt,
+  reviewCard,
+  settledAt,
+  sweepAt,
+  wrapWords,
+  type ExampleDef,
+  type ExampleId
+} from '../src/lib/tour/example-stage';
 
 const truth = computeGroundTruth(buildInventory());
 
@@ -1101,14 +1166,28 @@ test('strains: every number in the copy is read off the replay, the estate or th
   const joined = planTask('granular-read', new Set<FeatureId>(['join']), buildInventory());
   assert.ok(joined.ok && joined.calls === 1);
   assert.ok(by.chain.fix!.text.includes(`${joined.calls} call, not ${by.chain.calls}`), by.chain.fix!.text);
+  // The calculator card quotes no bill. The row's bill is the tools screen's; the ladder prices a calculator against its own
+  // plain list, a different tool design, so two totals for one question side by side would contradict each other.
+  assert.ok(!/\d/.test(by.arithmetic.fix!.text), by.arithmetic.fix!.text);
+  assert.ok(rung('calculator').bill.total > rung('filter').bill.total, 'the claim the card makes without a number: exact, not cheaper');
+  assert.notEqual(by.arithmetic.bill.total, rung('filter').bill.total, 'the two designs really do bill differently, which is why the card leaves the figures to the ladder');
+  // The ladder starts further back than the tools screen's cautious route, and the card says so.
+  assert.ok(by['fan-out'].calls < rung('per-property').replay.totals.calls, 'the cautious route is not the ladder\u2019s first rung');
   assert.ok(
-    by.arithmetic.fix!.text.endsWith(`\u2248 ${fmtTokens(rung('calculator').bill.total)} tokens read and written, against \u2248 ${fmtTokens(rung('filter').bill.total)}.`),
-    by.arithmetic.fix!.text
+    by['fan-out'].fix!.text.endsWith(`starts further back, with one tool per property: ${rung('per-property').replay.totals.calls} calls for this question, and ${rung('filter').replay.totals.calls} call by rung ${rung('filter').n}.`),
+    by['fan-out'].fix!.text
   );
-  assert.ok(by['fan-out'].fix!.text.includes(`from ${rung('per-property').replay.totals.calls} calls to ${rung('filter').replay.totals.calls}.`), by['fan-out'].fix!.text);
   const edited = planTask('bulk-write', new Set<FeatureId>(['update']), buildInventory());
   assert.ok(edited.ok);
   assert.ok(by.recital.fix!.text.endsWith(`takes ${edited.calls} calls, not ${by.recital.calls}.`), by.recital.fix!.text);
+});
+
+test('the tools screen claims no rate: its lessons are structural, and the measured runs live on the Results screen', () => {
+  // A lesson that says "off by 5-11% every time" on screen 2 contradicts screen 7, where the newer models get these sums right.
+  for (const [task, routes] of Object.entries(CATALOG_ROUTES)) {
+    for (const r of routes) assert.ok(!/%|benchmark|every time|always|never|swung/i.test(r.lesson), `${task}/${r.id}: ${r.lesson}`);
+  }
+  assert.equal(CATALOG_ROUTES['filter-aggregate'][0].lesson, 'One well-designed list call is enough. Then the model adds the figures in prose, and nothing checks the sum.');
 });
 
 test('strains: every fix links to a rung or a feature the language screen really has', () => {
@@ -1122,12 +1201,192 @@ test('strains: every fix links to a rung or a feature the language screen really
     if (rung) assert.ok(rungIds.has(rung) || rung === 'code', `${r.id}: rung ${rung} exists`);
     const features = (url.searchParams.get('f') ?? '').split(',').filter(Boolean);
     for (const f of features) assert.ok(FEATURE_IDS.includes(f as FeatureId), `${r.id}: feature ${f} exists`);
-    // A feature is switched on in the section that grows the language, so the link lands there.
-    if (features.length) assert.equal(url.hash, '#grow', `${r.id}: the feature is shown where it is switched on`);
+    // A feature is switched on in the step that grows the language, so the link lands there.
+    if (features.length) assert.equal(url.searchParams.get('stage'), 'grow', `${r.id}: the feature is shown where it is switched on`);
+    assert.ok(!(rung && url.searchParams.get('stage')), `${r.id}: a link names a rung or a step, not both`);
   }
   assert.equal(strainLink(null), '/tour/language');
   assert.equal(strainLink('calculator'), '/tour/language?rung=calculator');
-  assert.equal(strainLink('query', ['join', 'update'], true), '/tour/language?rung=query&f=join,update#grow');
+  assert.equal(strainLink('query', ['join', 'update'], true), '/tour/language?stage=grow&f=join,update');
+});
+
+test('strains: a link carries the beat it was followed from, and the language screen reads it back', () => {
+  const href = withOrigin(strainLink('calculator'), 4);
+  assert.equal(href, '/tour/language?rung=calculator&from=strains:4');
+  assert.equal(withOrigin('/tour/language', 2), '/tour/language?from=strains:2');
+  const from = new URL(href, 'http://tour.test').searchParams.get('from') ?? '';
+  assert.deepEqual(ORIGIN.exec(from)?.slice(1), ['4']);
+  assert.equal(ORIGIN.exec('strains:'), null);
+  assert.equal(ORIGIN.exec('elsewhere:4'), null);
+});
+
+// ── the stage under each strain ────────────────────────────────────────────
+
+test('strain stage: shortening an id keeps its last segment, and leaves everything else alone', () => {
+  const id = '/subscriptions/sub-7f3a9c20-prod/resourceGroups/web-prod/providers/Microsoft.Network/networkInterfaces/web-prod-03-nic';
+  assert.equal(shortIds(`"${id}"`), '"\u2026/web-prod-03-nic"');
+  assert.equal(shortIds('web-prod-03'), 'web-prod-03');
+  assert.equal(showArgs({ id }), '{ id: "\u2026/web-prod-03-nic" }');
+  assert.equal(showArgs({}), '{ }');
+  assert.equal(showArgs({ name: 'web-prod-03', tags: { env: 'staging' } }), '{ name: "web-prod-03", tags: {"env":"staging"} }');
+  assert.equal(pickFields('{"a":1,"b":{"c":"x"},"d":[1]}', ['c', 'a', 'zzz']), 'c: "x"\na: 1', 'in the order asked, skipping what is not there');
+});
+
+test('strain stage: each strain draws the calls of its own replay, one card for each, and what the fix draws is its plan', () => {
+  const inv = buildInventory();
+  const rungs = buildToolRungs(inv);
+  const strains = buildStrains(inv, rungs);
+  const stages = buildStages(strains, inv, rungs);
+  assert.deepEqual(stages.map((s) => s.id), strains.map((s) => s.id));
+  const by = Object.fromEntries(stages.map((s) => [s.id, s]));
+  const row = Object.fromEntries(strains.map((s) => [s.id, s]));
+  const rung = (id: RungId) => rungs.find((r) => r.id === id)!;
+
+  // A pane's headline count is the run's own count, and its words are the row's.
+  for (const s of stages) {
+    const r = row[s.id];
+    assert.equal(s.problem.calls, r.calls);
+    assert.equal(s.problem.text, r.strain.text);
+    assert.equal(s.problem.label, r.strain.label);
+    assert.equal(s.fix === null, r.fix === null);
+    if (s.fix && r.fix) {
+      assert.equal(s.fix.text, r.fix.text);
+      assert.equal(s.fix.href, r.fix.href);
+      assert.equal(s.fix.adds, r.fix.adds);
+    }
+    for (const pane of [s.problem, s.fix]) {
+      if (!pane) continue;
+      const keys = pane.cards.map((c) => c.key);
+      assert.equal(new Set(keys).size, keys.length, `${s.id}: card keys are unique within a pane`);
+      for (const c of pane.cards) assert.ok(c.title && (c.kind === 'more' || c.args), `${s.id}: ${c.key} says what the call was`);
+    }
+  }
+
+  // A chain: one card for each call, in order and in its own turn; the ids the model copied are marked on both ends.
+  const chain = row.chain.replay.calls;
+  assert.deepEqual(by.chain.problem.cards.map((c) => c.title), chain.map((c) => c.name));
+  assert.deepEqual(by.chain.problem.cards.map((c) => c.turn), chain.map((c) => c.turn));
+  assert.deepEqual(by.chain.problem.cards.map((c) => c.wrote), chain.map((c) => c.callTokens));
+  assert.deepEqual(by.chain.problem.cards.map((c) => c.sent), chain.map((c) => row.chain.replay.turns[c.turn - 1].promptTokens));
+  assert.ok(by.chain.problem.cards[1].sent! > by.chain.problem.cards[0].sent!, 'each turn sends the whole conversation again');
+  assert.equal(by.chain.problem.linked, true);
+  for (const i of [1, 2]) {
+    const mark = by.chain.problem.cards[i].marks[0];
+    assert.ok(mark, `card ${i} has a copied id`);
+    assert.ok((chain[i].args.id as string).endsWith(mark.slice(1)), 'the mark is the end of the id the call really asked for');
+    assert.ok(by.chain.problem.cards[i].args.includes(mark), 'drawn on the call that copies it');
+    assert.ok(by.chain.problem.cards[i - 1].result.includes(mark), 'and on the result it was copied from');
+    assert.ok(by.chain.problem.cards[i - 1].marks.includes(mark));
+  }
+  const vm = JSON.parse(chain[0].content) as { powerState: string };
+  assert.ok(by.chain.problem.cards[0].result.includes(`powerState: "${vm.powerState}"`), 'the answer\u2019s own field is picked out');
+  const ip = (JSON.parse(chain[2].content) as { ipAddress: string }).ipAddress;
+  assert.equal(by.chain.problem.cards[2].result, `ipAddress: "${ip}"`);
+  // The fix is the plan's one query, run on the estate, and it finds the same address.
+  const joined = planTask('granular-read', new Set<FeatureId>(['join']), buildInventory());
+  assert.equal(by.chain.fix!.calls, joined.calls);
+  assert.equal(by.chain.fix!.cards.length, joined.calls);
+  assert.equal(by.chain.fix!.cards[0].args, describeQuery(joined.queries[0] as Record<string, unknown>));
+  assert.ok(by.chain.fix!.cards[0].result.includes(`"${ip}"`) && by.chain.fix!.cards[0].result.includes(vm.powerState));
+  assert.equal(by.chain.fix!.cards[0].wrote, estimateTokens(`query_resources${JSON.stringify(joined.queries[0])}`), 'a planned call is counted the way a replayed one is');
+  // What a turn sends is shown on the chain only: the other strains\u2019 runs use other prompts, so the figures would not compare.
+  for (const s of stages.filter((x) => x.id !== 'chain')) {
+    for (const c of [...s.problem.cards, ...(s.fix?.cards ?? [])]) assert.equal(c.sent, null, `${s.id}: ${c.key}`);
+  }
+
+  // Arithmetic: the list, then a card for the model adding the figures itself; the fix is the calculator rung's own calls.
+  const list = row.arithmetic.replay.calls[0];
+  const vms = (JSON.parse(list.content) as { count: number }).count;
+  assert.deepEqual(by.arithmetic.problem.cards.map((c) => c.kind), ['call', 'sum']);
+  assert.ok(by.arithmetic.problem.cards[0].result.startsWith(`count: ${vms}\n`));
+  const calc = rung('calculator').replay.calls.filter((c) => c.name === 'calculate');
+  const first = String(calc[0].args.expression).split(' + ')[0];
+  assert.ok(by.arithmetic.problem.cards[0].result.includes(first), 'the first figure is on the list\u2026');
+  assert.ok(by.arithmetic.problem.cards[1].args.startsWith(first), '\u2026and is the first one the model adds');
+  assert.deepEqual([by.arithmetic.problem.cards[0].marks, by.arithmetic.problem.cards[1].marks], [[first], [first]]);
+  const grand = /Grand total \$([\d,]+\.\d\d)/.exec(row.arithmetic.replay.finalText)![1];
+  assert.ok(by.arithmetic.problem.cards[1].result.includes(`Grand total $${grand}`), 'the sum the model wrote is the answer the replay ends on');
+  assert.equal(by.arithmetic.fix!.calls, rung('calculator').replay.totals.calls);
+  assert.deepEqual(by.arithmetic.fix!.cards.map((c) => c.kind), ['same', 'call', 'call', 'more']);
+  assert.equal(by.arithmetic.fix!.cards[0].key, by.arithmetic.problem.cards[0].key, 'the list is one card, drawn once on each side, and the fix says it is the same call');
+  assert.equal(by.arithmetic.fix!.cards[0].title, list.name);
+  assert.deepEqual(by.arithmetic.fix!.cards.slice(1, 3).map((c) => c.result), calc.slice(0, 2).map((c) => c.content), 'what the calculator returned');
+  assert.ok(by.arithmetic.fix!.cards[1].marks.includes(first), 'the first figure is on the first sum, too');
+  assert.equal(by.arithmetic.fix!.cards[3].title, `+ ${calc.length - 2} more`);
+  const figures = calc.reduce((n, c) => n + String(c.args.expression).split('+').length, 0);
+  assert.ok(by.arithmetic.fix!.legend!.startsWith(`${figures} figures copied`), by.arithmetic.fix!.legend!);
+  const running = (JSON.parse(list.content) as { resources: Array<{ powerState: string }> }).resources.filter((v) => v.powerState === 'running').length;
+  assert.equal(figures, 2 * running, 'every running VM\u2019s cost is written twice: once in its group\u2019s sum, once in the total');
+
+  // Fan-out: the list, two of the lookups, and a tile for the rest; the fix is the one list, beside the ladder's counts.
+  const lookups = row['fan-out'].replay.calls.filter((c) => c.name === 'get_resource');
+  assert.deepEqual(by['fan-out'].problem.cards.map((c) => c.kind), ['call', 'call', 'call', 'more']);
+  assert.equal(by['fan-out'].problem.cards[3].title, `+ ${lookups.length - 2} more`);
+  assert.equal(by['fan-out'].problem.cards[1].args, showArgs(lookups[0].args));
+  assert.equal(by['fan-out'].fix!.calls, row.arithmetic.calls, 'the fix is the broad list, which is one call');
+  assert.equal(by['fan-out'].fix!.cards.length, 1);
+  assert.equal(by['fan-out'].fix!.cards[0].key, by['fan-out'].problem.cards[0].key, 'the list card is the same card on both sides');
+  assert.deepEqual(by['fan-out'].fix!.ladder!.map((r) => [r.id, r.calls]), (['per-property', 'one-tool', 'aspect', 'aspects', 'filter'] as const).map((id) => [id, rung(id).replay.totals.calls]));
+  assert.equal(by['fan-out'].fix!.ladder!.at(-1)!.calls, by['fan-out'].fix!.calls, 'the last rung is the one call');
+
+  // Recital: the list, the first write of each kind, and a tile for the rest; the fix is the plan's two updates.
+  const writes = row.recital.replay.calls.filter((c) => c.name !== 'list_resources');
+  const kinds = [...new Set(writes.map((c) => c.name))];
+  assert.deepEqual(by.recital.problem.cards.slice(1, 1 + kinds.length).map((c) => c.title), kinds);
+  assert.equal(by.recital.problem.cards.at(-1)!.title, `+ ${writes.length - kinds.length} more`);
+  const edited = planTask('bulk-write', new Set<FeatureId>(['update']), buildInventory());
+  assert.equal(by.recital.fix!.calls, edited.calls);
+  assert.deepEqual(by.recital.fix!.cards.map((c) => c.args), (edited.queries as Array<Record<string, unknown>>).map((q) => describeQuery(q)));
+  const matched = by.recital.fix!.cards.map((c) => Number(/matched: (\d+)/.exec(c.result)![1]));
+  const tagged = edited.changes!.filter((c) => c.field === 'tags.env').length;
+  const stopped = edited.changes!.filter((c) => c.field === 'powerState').length;
+  assert.deepEqual(matched, [tagged, stopped], 'each update touches what the replay\u2019s writes touched');
+  assert.equal(tagged + stopped, writes.length, 'one write for each resource the update changes');
+
+  // Nothing strains: one card, no fix.
+  assert.equal(by.fits.fix, null);
+  assert.equal(by.fits.problem.cards.length, 1);
+  assert.equal(by.fits.problem.cards[0].result, 'names: web-prod, data-prod, platform-prod');
+});
+
+test('strain stage: a query is shown in lines that leave out nothing it says', () => {
+  const inv = buildInventory();
+  const queries = [
+    ...(planTask('granular-read', new Set<FeatureId>(['join']), structuredClone(inv)).queries as Array<Record<string, unknown>>),
+    ...(planTask('bulk-write', new Set<FeatureId>(['update']), structuredClone(inv)).queries as Array<Record<string, unknown>>),
+    ...(planTask('filter-aggregate', new Set<FeatureId>(), structuredClone(inv)).queries as Array<Record<string, unknown>>)
+  ];
+  for (const q of queries) {
+    assert.ok(Object.keys(q).every((k) => (QUERY_KEYS as readonly string[]).includes(k)), `describeQuery knows every key of ${JSON.stringify(q).slice(0, 60)}`);
+    assert.equal(describeQuery(q).split('\n').length, Object.keys(q).length, 'one line for each key');
+  }
+  assert.equal(
+    describeQuery({ from: 'resources', where: [{ field: 'name', op: '=', value: 'web-prod-03' }, { field: 'tagCount', op: '=', value: 0 }], join: [{ via: 'nicId', as: 'nic' }], select: ['powerState'] }),
+    'from resources\nwhere name = "web-prod-03" and tagCount = 0\njoin nicId as nic\nselect powerState'
+  );
+  assert.equal(
+    describeQuery({ from: 'resources', update: { set: { 'tags.env': 'staging', powerState: 'deallocated' } } }),
+    'from resources\nupdate set tags.env = "staging", powerState = "deallocated"'
+  );
+});
+
+test('strain stage: the beats are the overview, then a problem and a fix for each row, and a solved row stays solved', () => {
+  const inv = buildInventory();
+  const strains = buildStrains(inv, buildToolRungs(inv));
+  const beats = buildBeats(strains);
+  assert.equal(beats.length, 1 + strains.length * 2);
+  assert.deepEqual(beats[0], { row: null, phase: 'overview', caption: beats[0].caption });
+  assert.deepEqual(beats.slice(1).map((b) => [b.row, b.phase]), strains.flatMap((_, i) => [[i, 'problem'], [i, 'fix']]));
+  assert.equal(new Set(beats.map((b) => b.caption)).size, beats.length, 'every beat says where it is');
+  assert.ok(beats.at(-1)!.caption.endsWith('keep it'), 'the narrow row ends the tour of the strains');
+  // The row that is put right, beat by beat: none, none, one, one, two, \u2026, all five.
+  assert.deepEqual(beats.map((_, at) => solvedRows(beats, at).size), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5]);
+  assert.deepEqual([...solvedRows(beats, 4)], [0, 1]);
+  for (let at = 1; at < beats.length; at++) {
+    for (const r of solvedRows(beats, at - 1)) assert.ok(solvedRows(beats, at).has(r), `row ${r} is still solved at beat ${at}`);
+  }
+  assert.equal(solvedRows(beats, -3).size, 0, 'a beat before the first is the overview');
+  assert.equal(solvedRows(beats, 99).size, strains.length, 'a beat past the last is the last');
 });
 
 test('query language: filter, group, aggregate, project, order and page behave like the data says', () => {
@@ -1703,6 +1962,15 @@ test('contract: the excerpt is cut from the tool description the model really ge
   assert.throws(() => contractExcerpt(SCHEMA_DOC.replace('// References are by id', '// Things are by id')), /does not explain references/);
 });
 
+test('one tool, one size: the language screen and the object screen both quote the code tool\u2019s whole definition', () => {
+  // The language screen reads it off the ladder's own code replay; the object screen counts it from the schema.
+  // They have to be the same number, or the talk says the code tool is 1,041 tokens on one screen and 926 on the next.
+  const fromLadder = compareSurfaces('filter-aggregate', programs['filter-aggregate']).code.turns[0].parts.tools;
+  const fromSchema = estimateTokens(JSON.stringify(CODE_TOOLS));
+  assert.equal(fromLadder, fromSchema);
+  assert.ok(estimateTokens(CODE_TOOLS[0].function.description) < fromSchema, 'the description alone is smaller: that is the number the object screen no longer shows');
+});
+
 test('copy: every step has narration, and its numbers come from the run', () => {
   for (const id of STEP_IDS) {
     const c = stepCopy(id, objFacts);
@@ -1722,4 +1990,448 @@ test('copy: every step has narration, and its numbers come from the run', () => 
   assert.match(text('index', { trace: other }), /7 records read/);
   assert.match(text('find', { trace: other }), /3 names.*resources\[2\]/);
   assert.match(text('return', { trace: other }), /3 values, \u2248 1,234 tokens/);
+});
+
+// ── the code screen: the object screen's stage, with programs running on it ──
+
+const exInv = buildInventory();
+const exProj = buildProjection(exInv);
+const exSource = (def: ExampleDef): { code: string; rationale?: string } =>
+  def.kind === 'task' && def.task ? programs[def.task] : { code: freshOf(def)!.code };
+const exBuild = (id: ExampleId) => {
+  const def = defOf(id);
+  const src = exSource(def);
+  const outcome = runTracked({ code: src.code, projection: exProj, rationale: src.rationale });
+  const strip = def.kind === 'task' && def.task ? billStrip(def.task, programs[def.task]) : undefined;
+  return { def, src, outcome, view: buildExample({ def, program: src, outcome, inv: exInv, strip }) };
+};
+const runsOnItsOwn = EXAMPLES.filter((e) => e.kind !== 'break');
+
+test('examples: nineteen beats in six examples, and each beat is a URL the screen reads back', () => {
+  const beats = exampleBeats();
+  assert.equal(beats.length, 19);
+  assert.deepEqual(EXAMPLES.map((e) => [e.id, e.phases.length]), [['cost', 3], ['tag', 4], ['disks', 3], ['ratio', 3], ['lookup', 3], ['break', 3]]);
+  assert.equal(new Set(beats.map((b) => b.href)).size, 19, 'every beat has a URL of its own');
+  assert.equal(beats[0].href, '/tour/code', 'the screen opens on the first example, with no parameters');
+  assert.equal(exampleHref('tag', 2), '/tour/code?ex=tag&step=2');
+  for (const b of beats) {
+    const url = new URL(b.href, 'http://tour.test');
+    assert.deepEqual(parseExampleState(url.searchParams), { id: b.id, step: b.step }, b.href);
+    assert.equal(b.phase, defOf(b.id).phases[b.step]);
+  }
+  // Only the writing example has a review, and it comes last.
+  assert.deepEqual(beats.filter((b) => b.phase === 'review').map((b) => b.id), ['tag']);
+  assert.deepEqual(beats.filter((b) => b.id === 'tag').map((b) => b.phase), ['write', 'run', 'answer', 'review']);
+  assert.deepEqual(beats.filter((b) => b.id === 'break').map((b) => b.phase), ['see', 'change', 'do']);
+});
+
+test('examples: whatever the URL says, the screen lands on a beat that exists', () => {
+  const at = (qs: string) => parseExampleState(new URLSearchParams(qs));
+  assert.deepEqual(at(''), { id: 'cost', step: 0 });
+  assert.deepEqual(at('ex=nope&step=1'), { id: 'cost', step: 1 }, 'an unknown example is the first');
+  assert.deepEqual(at('ex=tag&step=9'), { id: 'tag', step: 3 }, 'a step past the end is the last');
+  assert.deepEqual(at('ex=tag&step=-1'), { id: 'tag', step: 0 });
+  assert.deepEqual(at('ex=disks&step=abc'), { id: 'disks', step: 0 });
+  assert.deepEqual(at('step=1.5'), { id: 'cost', step: 0 });
+  assert.deepEqual(at('ex=break&step=2'), { id: 'break', step: 2 });
+});
+
+test('examples: every program fits its panel, at a size that can be read from the back of a room', () => {
+  for (const def of runsOnItsOwn) {
+    const src = exSource(def);
+    const lines = displayLines(src.code);
+    assert.ok(Math.max(...lines.map((l) => l.length)) <= 84, `${def.id}: the longest line is ${Math.max(...lines.map((l) => l.length))} characters`);
+    assert.ok(lineHeightFor(lines.length, Boolean(src.rationale)) >= 20, `${def.id}: ${lines.length} lines`);
+    assert.ok(lines.every((l) => l.trim() !== ''), 'blank lines are dropped');
+    assert.match(lines[0], /^function main\(/);
+    assert.equal(lines[lines.length - 1], '}');
+  }
+  // Long programs shrink to fit; short ones stop growing at the object screen's size.
+  assert.equal(lineHeightFor(3), 21.5);
+  assert.ok(lineHeightFor(40) < lineHeightFor(30));
+  assert.ok(lineHeightFor(27, true) < lineHeightFor(27, false), 'a rationale takes a line of its own');
+});
+
+test('examples: the body of a program, and the line that returns its answer, are found by what they say', () => {
+  assert.deepEqual(bandsOf(['function main(data) {', '  const a = 1;', '  return a;', '}']), { body: [1, 2], ret: [2, 2] });
+  assert.deepEqual(bandsOf(['function main(data) {', '  const xs = data.resources;', '  return xs', '    .map((r) => r.name);', '}']), { body: [1, 3], ret: [2, 3] }, 'a return that runs over lines is one band');
+  assert.deepEqual(bandsOf(['function main(data) {', '}']), { body: [1, 1], ret: null });
+  assert.deepEqual(bandsOf(['function main(data) {', '  const f = () => {', '    return 1;', '  };', '  return f();', '}']).ret, [4, 4], 'a nested return is not the answer');
+  for (const def of runsOnItsOwn) {
+    const lines = displayLines(exSource(def).code);
+    const { body, ret } = bandsOf(lines);
+    assert.ok(ret, `${def.id} returns something`);
+    assert.match(lines[ret![0]], /^ {2}return\b/);
+    assert.ok(body[0] === 1 && body[1] === lines.length - 2, def.id);
+  }
+});
+
+test('examples: the counters are what the run did, and the cost example says what it really scanned and used', () => {
+  const cost = exBuild('cost');
+  assert.equal(cost.view.status, 'ok');
+  assert.deepEqual(
+    [cost.view.counters.scanned, cost.view.counters.scannedUnit, cost.view.counters.reads, cost.view.counters.used, cost.view.counters.usedLabel],
+    [194, 'records', cost.outcome.totals.propertyReads, 18, 'records it used']
+  );
+  assert.equal(cost.view.counters.reads, 394);
+  assert.equal(cost.view.marks.used.size, needleFor('filter-aggregate', exInv).resourceIds.size, 'the records it used are the benchmark\'s needle');
+  assert.equal(cost.view.counters.tokens, backToModelTokens(cost.outcome));
+  assert.equal(Object.keys(cost.view.marks.depth).length, 194, 'every record has a depth: how many fields were read');
+
+  const tag = exBuild('tag');
+  assert.deepEqual([tag.view.counters.usedLabel, tag.view.counters.used, tag.view.counters.usedSub], ['proposed changes', 70, 'fields on 37 resources']);
+  assert.equal(tag.view.marks.written.size, 37);
+  assert.equal(tag.view.marks.refused.size, 0);
+  assert.equal(tag.view.counters.reads, 609);
+
+  const disks = exBuild('disks');
+  assert.equal(answerItems(disks.outcome), 16, 'sixteen disks belong to a stopped or deallocated VM');
+  assert.equal(disks.view.marks.used.size, 32, 'the sixteen disks and their sixteen VMs');
+  const stopped = new Set(['stopped', 'deallocated']);
+  const vms = new Map(exInv.resources.map((r) => [r.id, r]));
+  const expected = exInv.resources.filter((r) => r.type === 'disk' && r.attachedToVmId && stopped.has((vms.get(r.attachedToVmId) as VirtualMachine | undefined)?.powerState ?? ''));
+  assert.equal(expected.length, 16, 'the estate agrees with the program');
+
+  const ratio = exBuild('ratio');
+  assert.equal(answerItems(ratio.outcome), 5);
+  const rows = JSON.parse(ratio.outcome.resultText!) as Array<{ vm: string; perVcpu: number }>;
+  assert.deepEqual(rows, [...rows].sort((a, b) => b.perVcpu - a.perVcpu), 'most expensive first');
+  const vmsOnly = exInv.resources.filter((r): r is VirtualMachine => r.type === 'virtualMachine');
+  const top = [...vmsOnly].sort((a, b) => b.costMonthly / b.vcpus - a.costMonthly / a.vcpus)[0];
+  assert.equal(rows[0].vm, top.name);
+  assert.equal(rows[0].perVcpu, Math.round((top.costMonthly / top.vcpus) * 100) / 100, 'rounded to the cent by the program, not the model');
+
+  const lookup = exBuild('lookup');
+  assert.deepEqual(
+    [lookup.view.counters.scannedUnit, lookup.view.counters.scanned, lookup.view.counters.usedLabel, lookup.view.counters.used],
+    ['groups', 6, 'groups it used', 3]
+  );
+  assert.equal(lookup.outcome.totals.resourcesScanned, 0, 'no resource record is read');
+});
+
+test('examples: the answer is cut to its card, and says how much was cut', () => {
+  const disks = answerCard(exBuild('disks').outcome);
+  assert.equal(disks.tone, 'ok');
+  assert.equal(disks.label, 'back to the model');
+  assert.equal(disks.lines.length, MAX_ANSWER_LINES - 1, 'one line is kept back for "n more"');
+  assert.equal(disks.more, 10, 'sixteen entries, six shown');
+  for (const e of runsOnItsOwn) {
+    const a = exBuild(e.id).view.answer;
+    assert.ok(a.lines.length <= MAX_ANSWER_LINES, e.id);
+    assert.ok(a.lines.every((l) => l.length <= ANSWER_WIDTH), `${e.id}: no line is wider than the card`);
+    assert.ok(a.tokens > 0 && a.tokens < 300, `${e.id}: ${a.tokens} tokens`);
+  }
+  assert.deepEqual(wrapWords('error: Invalid tag monthly: keys must be supported and values must be strings', 40), ['error: Invalid tag monthly: keys must be', '  supported and values must be strings']);
+  assert.deepEqual(wrapWords('short', 40), ['short']);
+  // A write is told the counts it needs for its summary and nothing more.
+  const tag = exBuild('tag').view.answer;
+  assert.ok(tag.lines.some((l) => /^changeCount: 70$/.test(l)));
+  assert.ok(tag.lines.some((l) => /^resourcesAffected: 37$/.test(l)));
+});
+
+test('examples: the change set for review says what it is made of, and how much is not listed', () => {
+  const r = reviewCard(exBuild('tag').outcome)!;
+  assert.equal(r.resources, 37);
+  assert.equal(r.fields, 70);
+  assert.equal(r.summary, 'tags on 33 resources  \u00b7  power state on 4');
+  assert.equal(r.rows.length, REVIEW_ROWS);
+  assert.equal(r.hidden, 37 - REVIEW_ROWS);
+  assert.ok(r.rows.some((x) => /^powerState .* \u2192 /.test(x.changes)), 'a power change is among the rows shown, so the list shows both kinds');
+  assert.ok(r.rows.some((x) => x.changes.startsWith('+ ')), 'and so is a tag');
+  assert.equal(r.rows[0].changes.startsWith('+ '), true);
+  // Nothing to review when nothing changed, or when the run was refused.
+  assert.equal(reviewCard(exBuild('cost').outcome), null);
+  assert.equal(reviewCard(run(CONTRACT_PROBES.find((p) => p.id === 'cost')!.code)), null);
+  for (const e of runsOnItsOwn.filter((x) => x.id !== 'tag')) assert.equal(exBuild(e.id).view.review, null, e.id);
+});
+
+test('examples: what each example is up against says the truth about who wins, including where the catalogue does', () => {
+  const cost = exBuild('cost').view.strip;
+  assert.equal(cost?.kind, 'bill');
+  if (cost?.kind === 'bill') {
+    assert.equal(cost.winner, 'tie');
+    assert.equal(cost.headline, 'About the same bill on both surfaces.');
+    assert.deepEqual(cost.bars.map((b) => b.id), ['catalog', 'code']);
+    assert.equal(cost.scale, Math.max(cost.bars[0].bill.total, cost.bars[1].bill.total));
+  }
+  const tag = exBuild('tag').view.strip;
+  assert.equal(tag?.kind === 'bill' && tag.winner, 'code');
+  assert.match(tag?.kind === 'bill' ? tag.headline : '', /^At its best, the catalogue is billed 8\.0\u00d7 the tokens of the code surface\.$/);
+  assert.equal(tag?.kind === 'bill' && tag.bars[0].calls, 38, 'one call to read, thirty-seven to write');
+  const lookup = exBuild('lookup').view.strip;
+  assert.equal(lookup?.kind === 'bill' && lookup.winner, 'catalog', 'the counter-case is kept');
+  assert.match(lookup?.kind === 'bill' ? lookup.headline : '', /^Here the catalogue wins/);
+  // The two questions the language could not ask are shown refused by the language, then answered by code.
+  const disks = exBuild('disks').view.strip;
+  assert.deepEqual(disks, { kind: 'language', refused: 'Unknown parameter "join". This tool does not support it.', needs: 'Follow references' });
+  const ratio = exBuild('ratio').view.strip;
+  assert.deepEqual(ratio, { kind: 'language', refused: 'Unknown parameter "compute". This tool does not support it.', needs: 'Arithmetic in computed values' });
+  assert.equal(freshOf(defOf('disks'))?.id, 'disks');
+  assert.equal(freshOf(defOf('cost')), null);
+});
+
+test('examples: the narration quotes the run it narrates, and no sentence is left half-made', () => {
+  for (const e of runsOnItsOwn) {
+    const { def, view } = exBuild(e.id);
+    assert.deepEqual(Object.keys(view.copy), [...def.phases], `${e.id}: one sentence for each beat`);
+    for (const [phase, text] of Object.entries(view.copy)) {
+      assert.ok(text && text.length > 40, `${e.id} ${phase}`);
+      assert.ok(!/undefined|NaN|null|\[object|\{\}/.test(text), `${e.id} ${phase}: ${text}`);
+    }
+  }
+  const cost = exBuild('cost').view.copy;
+  assert.match(cost.run ?? '', /194 records are scanned and not one is sent to the model; the 18 that pass every filter/);
+  assert.match(cost.run ?? '', /394 field reads, no tokens/);
+  assert.match(cost.answer ?? '', /\u2248 63 tokens/);
+  const tag = exBuild('tag').view.copy;
+  assert.match(tag.run ?? '', /70 field changes on 37 resources/);
+  assert.match(tag.review ?? '', /37 resources, 70 fields/);
+  assert.match(exBuild('disks').view.copy.answer ?? '', /^16 disks come back, \u2248 248 tokens/);
+  assert.match(exBuild('ratio').view.copy.answer ?? '', /^5 rows come back/);
+  assert.match(exBuild('lookup').view.copy.run ?? '', /6 resource groups and no resource record\. 3 of the groups are Production's/);
+  assert.match(exBuild('lookup').view.copy.answer ?? '', /A narrow tool would have done this too, and for less\./);
+});
+
+test('examples: each way to break a program is shown as the model would be told, and the loop is never run here', () => {
+  const def = defOf('break');
+  assert.deepEqual(def.phases, ['see', 'change', 'do']);
+  for (const layer of ['see', 'change', 'do'] as const) {
+    assert.ok(probesOf(layer).length >= 1, layer);
+    assert.ok(probesOf(layer).some((p) => p.id === BREAK_START[layer]), `${layer} opens on one of its own probes`);
+    assert.ok(LAYER_LINE[layer].endsWith('.'));
+  }
+  for (const p of CONTRACT_PROBES) {
+    // The loop would hang a synchronous run: on the page it goes through the worker, here it is the worker's own answer.
+    const outcome = /while \(true\)/.test(p.code)
+      ? failedOutcome('timeout', 'Stopped after 1500 ms. The run took too long, so its worker was terminated.', 1500)
+      : runTracked({ code: p.code, projection: exProj });
+    const view = buildExample({ def, program: { code: p.code }, outcome, inv: exInv });
+    assert.equal(probeFor(p.code)?.id, p.id, 'a program on screen is recognised as the probe it was loaded from');
+    assert.ok(probeResult(p, outcome).met, `${p.id}: ${probeResult(p, outcome).headline}`);
+    assert.equal(view.answer.tone, outcome.status === 'ok' ? 'ok' : 'bad', p.id);
+    assert.ok(view.copy.see?.startsWith(p.label), p.id);
+    assert.equal(view.copy.see, view.copy.change);
+    assert.equal(view.copy.see, view.copy.do);
+    assert.equal(view.marks.written.size, outcome.status === 'ok' ? outcome.resourcesAffected : 0, `${p.id}: only a change that was accepted is drawn as one`);
+    assert.equal(view.marks.refused.size > 0, outcome.status === 'rejected' && Object.keys(outcome.attempted).length > 0, `${p.id}: a refused change shows what it tried`);
+  }
+  // A refused write shows the cell it tried to change; an error or a time limit has nothing to circle.
+  const cost = CONTRACT_PROBES.find((p) => p.id === 'cost')!;
+  const refused = buildExample({ def, program: { code: cost.code }, outcome: runTracked({ code: cost.code, projection: exProj }), inv: exInv });
+  assert.equal(refused.marks.refused.size, 1);
+  assert.equal(refused.answer.label, 'refused: what the model is told');
+  assert.deepEqual(refused.answer.lines, ['error: web-prod-03: costMonthly is read-only']);
+  const loop = buildExample({ def, program: { code: 'function main(data) {\n  while (true) {}\n}' }, outcome: failedOutcome('timeout', 'Stopped after 1500 ms.', 1500), inv: exInv });
+  assert.equal(loop.answer.label, 'stopped: what the model is told');
+  assert.equal(loop.marks.refused.size, 0);
+  // A program someone typed is still a program: it gets a sentence of its own, and the program is not mistaken for a probe.
+  const typed = buildExample({ def, program: { code: 'function main(data) { return 1; }' }, outcome: runTracked({ code: 'function main(data) { return 1; }', projection: exProj }), inv: exInv });
+  assert.equal(probeFor('function main(data) { return 1; }'), null);
+  assert.match(typed.copy.do ?? '', /^Your program\. The runtime answered ok\./);
+});
+
+test('examples: the motion places everything in order, and each beat rests where it should', () => {
+  // The program writes itself in line by line, then the sweep runs, then the answer arrives, then the review.
+  for (const i of [0, 12, 26]) {
+    assert.equal(lineAlpha(i, U_START), 0, `line ${i} is not there yet`);
+    assert.equal(lineAlpha(i, 0), 1, `line ${i} is written by the time the program is complete`);
+  }
+  assert.ok(lineAlpha(0, -0.8) > lineAlpha(20, -0.8), 'top to bottom');
+  assert.equal(chromeAt(U_START), 0);
+  assert.equal(chromeAt(0), 1);
+  assert.equal(sweepAt(0), 0);
+  assert.equal(sweepAt(1), 1);
+  assert.equal(settledAt(0.5), 0);
+  assert.equal(settledAt(1), 1);
+  assert.equal(answerAt(1), 0);
+  assert.equal(answerAt(2), 1);
+  assert.equal(reviewAt(2), 0);
+  assert.equal(reviewAt(3), 1);
+  // The body of the program is lit while it runs, its return while the answer comes back, and never both at rest.
+  assert.equal(bodyBand(0), 0);
+  assert.ok(bodyBand(0.6) > 0.99);
+  assert.equal(bodyBand(1.5), 0);
+  assert.equal(retBand(0.6), 0);
+  assert.ok(retBand(1.6) > 0.99);
+  assert.equal(retBand(2.5), 0);
+  assert.deepEqual(PHASE_U, { write: 0, run: 1, answer: 2, review: 3, see: 2, change: 2, do: 2 });
+  for (const b of exampleBeats()) assert.ok(PHASE_U[b.phase] >= 0 && PHASE_U[b.phase] <= 3);
+});
+
+// ── the results screen: the benchmark, from the newer models down to an older one ──
+
+const MODEL_KEYS = MODELS.map((m) => m.key);
+const SIX = METHODS.map((m) => m.id);
+
+test('results: six methods on three models, eighty runs in every cell, and hosted calling on the newer two only', () => {
+  assert.deepEqual(MODEL_KEYS, ['newest', 'newer', 'older'], 'the strongest first: the screen turns the model down as it goes');
+  assert.deepEqual(MODELS.map((m) => m.deployment), ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.4-mini']);
+  assert.equal(SOURCE.tasks * SOURCE.repetitions, 80);
+  for (const m of MODEL_KEYS) {
+    for (const id of SIX) {
+      const c = cellOf(m, id);
+      assert.equal(c.runs, 80, `${m} ${id}`);
+      assert.ok(Number.isInteger(c.correct) && c.correct >= 0 && c.correct <= c.runs, `${m} ${id}`);
+      assert.ok(c.totalUsd > 0 && c.totalUsd < 1, `${m} ${id}: ${c.totalUsd}`);
+    }
+  }
+  const hosted: ArmId[] = ['naive-ptc-native', 'tuned-ptc-native'];
+  for (const m of ['newest', 'newer'] as const) for (const a of hosted) assert.equal(cellOf(m, a).runs, 80, `${m} ${a}`);
+  for (const a of hosted) assert.equal(RESULTS.older[a], undefined, `the oldest deployment rejects hosted calling: ${a}`);
+  assert.deepEqual(hostedSpan(), { min: 79, max: 80 });
+  assert.equal(OTHERS.length, 5);
+  assert.ok(!OTHERS.includes(CODE));
+  assert.deepEqual(Object.keys(GROUPS), ['catalogue', 'tuned', 'code']);
+  assert.deepEqual(METHODS.map((m) => m.group), ['catalogue', 'catalogue', 'catalogue', 'tuned', 'tuned', 'code']);
+});
+
+test('results: the snapshot is the benchmark\'s own export, cell for cell, when the export is at hand', { skip: !existsSync(new URL('../' + SOURCE.file, import.meta.url)) }, () => {
+  const file = JSON.parse(readFileSync(new URL('../' + SOURCE.file, import.meta.url), 'utf8')) as {
+    rows: Array<{ model: ModelKey; arm: ArmId; group: string; runs: number; correct: number; totalUsd: number }>;
+  };
+  const all = file.rows.filter((r) => r.group === 'all');
+  const held = MODEL_KEYS.flatMap((m) => Object.keys(RESULTS[m]).map((a) => `${m}/${a}`));
+  assert.deepEqual([...held].sort(), all.map((r) => `${r.model}/${r.arm}`).sort(), 'the same cells, no more and no fewer');
+  for (const r of all) {
+    const c = cellOf(r.model, r.arm);
+    assert.equal(c.runs, r.runs, `${r.model} ${r.arm}: runs`);
+    assert.equal(c.correct, r.correct, `${r.model} ${r.arm}: correct`);
+    assert.ok(Math.abs(c.totalUsd - r.totalUsd) < 1e-7, `${r.model} ${r.arm}: ${c.totalUsd} against ${r.totalUsd}`);
+  }
+});
+
+test('results: dollars per 1,000 right answers print the way the benchmark\'s report prints them', () => {
+  // The table of section 1.4 of docs/ptc-matrix-results.md, by model, in the screen's row order.
+  const printed: Record<ModelKey, string[]> = {
+    older: ['$18.7', '$13.8', '$4.09', '$6.46', '$5.63', '$2.66'],
+    newer: ['$3.22', '$3.41', '$0.838', '$2.00', '$0.949', '$0.744'],
+    newest: ['$1.40', '$1.48', '$0.387', '$0.851', '$0.395', '$0.286']
+  };
+  for (const m of MODEL_KEYS) assert.deepEqual(SIX.map((id) => fmtUsd(perThousandRight(cellOf(m, id)))), printed[m], m);
+  assert.equal(fmtUsd(perThousandRight(cellOf('newer', 'naive-ptc-native'))), '$0.998');
+  assert.equal(fmtUsd(perThousandRight(cellOf('newest', 'tuned-ptc-native'))), '$0.539');
+  assert.equal(fmtUsd(Infinity), '\u2013', 'a method with no right answers has no price per right answer');
+  assert.equal(perThousandRight({ runs: 80, correct: 0, totalUsd: 1 }), Infinity);
+  assert.equal(fmtTimes(65.39), '65.4\u00d7');
+  assert.equal(fmtTimes(13.33), '13.3\u00d7');
+  assert.equal(fmtTimes(4.9048), '4.90\u00d7');
+  assert.equal(fmtTimes(120.4), '120\u00d7');
+});
+
+test('results: the claims the screen makes hold for the cells they are read from', () => {
+  // The code surface is right every time, on every model, and the other methods are not: the screen's thesis.
+  for (const m of MODEL_KEYS) assert.equal(cellOf(m, CODE).correct, 80, `${m}: the code surface`);
+  assert.deepEqual(codeSpan(MODEL_KEYS), { min: 80, max: 80 });
+  assert.deepEqual(othersSpan(['older']), { min: 39, max: 56 }, 'the older model breaks every other method');
+  assert.deepEqual(othersSpan(['newer', 'newest']), { min: 76, max: 80 }, 'the newer models nearly hold them');
+  for (const id of OTHERS) assert.ok(cellOf('older', id).correct < 60, `older ${id}`);
+  // And it is the cheapest way to a right answer on all three, which the dollars beat says.
+  for (const m of MODEL_KEYS) assert.equal(cheapest(m).id, CODE, `${m}: cheapest right answer`);
+  assert.deepEqual([nextCheapest('newest').id, fmtUsd(nextCheapest('newest').usd)], ['naive-ptc', '$0.387']);
+  assert.deepEqual([nextCheapest('older').id, nextCheapest('older').correct], ['naive-ptc', 56]);
+  // Accuracy ties on the strongest model: nobody is below 76, and the code surface is not above 80.
+  assert.ok(othersSpan(['newest']).min >= 76);
+  // The two effects multiply into the whole, exactly, and they are the figures the report quotes.
+  const x = multiples();
+  assert.ok(Math.abs(x.model * x.method - x.both) < 1e-9, 'model \u00d7 method = both');
+  assert.deepEqual([fmtTimes(x.both), fmtTimes(x.model), fmtTimes(x.method)], ['65.4\u00d7', '13.3\u00d7', '4.90\u00d7']);
+  assert.equal(REPORTED.estateResources, buildInventory().resources.length, 'the estate the runs drove is the estate the tour shows');
+  assert.equal(REPORTED.newestSmallestP, 0.12);
+});
+
+test('results: four beats, each a URL the screen reads back, and each with the sentence and the figures that belong to it', () => {
+  assert.deepEqual(RESULTS_BEATS.map((b) => b.id), ['newer', 'older', 'dollars', 'why']);
+  assert.deepEqual(RESULTS_BEATS.map((b) => b.href), ['/tour/results', '/tour/results?show=older', '/tour/results?show=dollars', '/tour/results?show=why']);
+  for (const b of RESULTS_BEATS) {
+    assert.equal(parseResultsBeat(new URL(b.href, 'http://tour.test').searchParams), b.id, b.href);
+    assert.equal(resultsHref(b.id), b.href);
+    assert.ok(NEXT_LABEL[b.id].length > 0);
+  }
+  assert.equal(parseResultsBeat(new URLSearchParams('show=nope')), 'newer', 'an unknown beat is the first');
+  assert.equal(parseResultsBeat(new URLSearchParams('')), 'newer');
+
+  const views = Object.fromEntries(RESULTS_BEATS.map((b) => [b.id, buildResults(b.id)])) as Record<ResultsBeatId, ReturnType<typeof buildResults>>;
+  for (const b of RESULTS_BEATS) {
+    const v = views[b.id];
+    assert.equal(v.panels.length, 3);
+    assert.deepEqual(v.panels.map((p) => p.model), MODEL_KEYS);
+    assert.ok(v.lead.length > 60 && v.lead.length <= 230, `${b.id}: ${v.lead.length} characters is two lines of narration, not three`);
+    assert.ok(!/undefined|NaN|null|\[object|Infinity/.test(v.lead + JSON.stringify(v.tiles ?? []) + JSON.stringify(v.columns ?? []) + v.footnote), b.id);
+    assert.equal(v.tiles !== null, b.id !== 'why', `${b.id}: figures, or the reasons`);
+    assert.equal(v.columns !== null, b.id === 'why');
+  }
+  // What has been introduced, and what the beat is about.
+  assert.deepEqual(views.newer.panels.map((p) => p.revealed), [true, true, false], 'the older model is held back for the second beat');
+  assert.deepEqual(views.older.panels.map((p) => p.revealed), [true, true, true]);
+  assert.deepEqual(views.newer.panels.map((p) => p.focus), [true, true, false]);
+  assert.deepEqual(views.older.panels.map((p) => p.focus), [false, false, true]);
+  assert.deepEqual(views.dollars.panels.map((p) => p.focus), [true, true, true]);
+  assert.deepEqual(views.why.panels.map((p) => p.focus), [false, false, false]);
+  assert.deepEqual(RESULTS_BEATS.map((b) => views[b.id].emphasis), ['accuracy', 'accuracy', 'dollars', 'accuracy']);
+  assert.match(views.newer.lead, /the other five get 76 to 80 of 80 right, and the code surface gets 80/);
+  assert.match(views.older.lead, /gpt-5\.4-mini\. The code surface is still at 80 of 80\. The other five methods fall to between 39 and 56\./);
+  assert.match(views.dollars.lead, /the cheapest on all three models/);
+  assert.match(views.why.lead, /^A reading, not a measurement/);
+  assert.match(views.newer.footnote, /Hosted programmatic calling, run on the two newer models only, got 79 to 80 of 80/);
+  assert.match(views.newer.footnote, /80 runs a bar: 8 tasks, 10 runs each/);
+});
+
+test('results: each beat\'s figures are the cells they quote', () => {
+  const tiles = (id: ResultsBeatId) => buildResults(id).tiles!.map((t) => [t.label, t.value]);
+  assert.deepEqual(tiles('newer'), [['Code surface', '80 of 80'], ['The other five', '76\u201380 of 80'], ['Cheapest right answer', 'Code surface']]);
+  assert.deepEqual(tiles('older'), [['Code surface', '80 of 80'], ['The other five', '39\u201356 of 80'], ['Cheapest right answer', 'Code surface']]);
+  assert.match(buildResults('newer').tiles![2].sub, /\$0\.286 and \$0\.744 per 1,000 right answers\. Next cheapest: \$0\.387 and \$0\.838\./);
+  assert.match(buildResults('older').tiles![2].sub, /\$2\.66 per 1,000 right answers\. Next cheapest: \$4\.09, at 56 of 80\./);
+  assert.deepEqual(tiles('dollars'), [['The model alone', '13.3\u00d7'], ['The method alone', '4.90\u00d7'], ['Both together', '65.4\u00d7']]);
+  assert.deepEqual(buildResults('dollars').tiles!.map((t) => t.op), [undefined, '\u00d7', '='], 'read as a sum');
+  assert.match(buildResults('dollars').tiles![2].sub, /gpt-6-luna with the code surface, \$0\.286, against gpt-5\.4-mini with one-by-one catalogue calls, \$18\.7/);
+  assert.match(buildResults('dollars').tiles![0].sub, /77 right instead of 39/);
+  assert.match(buildResults('dollars').tiles![1].sub, /80 right instead of 77/);
+  // The reasons name the figures they rest on, and mark which of them were measured.
+  const [why, limits] = buildResults('why').columns!;
+  assert.deepEqual(why.points.map((p) => p.measured), [false, false, true]);
+  assert.equal(why.tagged, true);
+  assert.equal(limits.tagged, false);
+  assert.match(why.points[2].text, /gpt-5\.4-mini, programs over the catalogue got 56 of 80 right, and over the tuned catalogue 49\./);
+  assert.match(limits.points[0].text, /gpt-6-luna accuracy ties: the smallest p-value against the code surface is 0\.12\./);
+  assert.match(limits.points[1].text, /One mock estate of 194 resources, eight tasks, ten runs each\./);
+  assert.match(limits.points[2].text, /single narrow lookup .* about 0\.6\u00d7 the tokens/);
+  assert.match(limits.points[3].text, /not an invoice/);
+});
+
+test('results: every row is a bar for the cell it names, and one row on each panel is the cheapest', () => {
+  for (const b of RESULTS_BEATS) {
+    for (const p of buildResults(b.id).panels) {
+      assert.deepEqual(p.groups.map((g) => g.id), ['catalogue', 'tuned', 'code']);
+      const rows = p.groups.flatMap((g) => g.rows);
+      assert.deepEqual(rows.map((r) => r.id), SIX, 'the rows are the same in the same order on every model, so the bars can be compared across panels');
+      assert.equal(rows.filter((r) => r.cheapest).length, 1, `${p.model}: one cheapest`);
+      assert.equal(rows.find((r) => r.cheapest)!.id, CODE);
+      assert.equal(p.groups[2].rows.length, 1, 'the code surface is a group of its own');
+      for (const r of rows) {
+        const c = cellOf(p.model, r.id);
+        assert.equal(r.correct, c.correct);
+        assert.equal(r.fill, c.correct / c.runs);
+        assert.equal(r.usd, fmtUsd(perThousandRight(c)));
+        assert.equal(r.isCode, r.id === CODE);
+        assert.ok(r.label.length <= 22, `${r.label}: the label column is 186px`);
+        assert.match(r.aria, new RegExp(`${r.correct} of ${r.runs} right, ${r.usd.replace('$', '\\$')} per 1,000 right answers$`));
+      }
+    }
+  }
+});
+
+test('the stepper lists the seven screens, every screen it names is a page, and every page links only to pages', () => {
+  const routes = new URL('../src/routes/tour/', import.meta.url);
+  const pages = readdirSync(routes, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(new URL(`${d.name}/+page.svelte`, routes))).map((d) => `/tour/${d.name}`);
+  const stepper = readFileSync(new URL('../src/lib/components/tour/TourStepper.svelte', import.meta.url), 'utf8');
+  const steps = [...stepper.matchAll(/href: '(\/tour\/[a-z]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(steps, ['/tour/estate', '/tour/tools', '/tour/strains', '/tour/language', '/tour/object', '/tour/code', '/tour/results']);
+  assert.deepEqual([...pages].sort(), [...steps].sort(), 'no page is missing from the stepper, and no step is missing a page');
+  for (const d of pages) {
+    const src = readFileSync(new URL(`../src${d.replace('/tour', '/routes/tour')}/+page.svelte`, import.meta.url), 'utf8');
+    for (const m of src.matchAll(/href: '(\/tour\/[a-z]+)[?']/g)) assert.ok(pages.includes(m[1]), `${d} links to ${m[1]}`);
+  }
+  const results = readFileSync(new URL('../src/lib/tour/results.ts', import.meta.url), 'utf8');
+  assert.ok(!/href: '\/tour\/(?!results)/.test(results), 'the results module does not link out');
 });

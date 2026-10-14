@@ -39,16 +39,17 @@ Expand any tool call to inspect its inputs and outputs. Compare model turns, tok
 
 ### Guided tour
 
-For a walk-through with no model involved, open `/tour`. Six screens, each its own URL:
+For a walk-through with no model involved, open `/tour`. Seven screens, each its own URL, each a few beats you step through with the arrow keys (`docs/tour-script.md` is the talk, beat by beat):
 
 1. `/tour/estate`: the 194 resources, wired together, through six lenses.
 2. `/tour/tools`: one question answered one tool call at a time, with the touched resources painted step by step.
-3. `/tour/strains`: five questions from the last screen side by side, where each one strains a plain tool catalogue (a chain of dependent calls, arithmetic by inference, a call per VM, one write per resource) and the usual fix for each, revealed on demand. A narrow question that strains nothing is there too.
-4. `/tour/language`: the same question on eight tool designs, adding a calculator and ending in a query language you can grow feature by feature.
+3. `/tour/strains`: where a plain tool catalogue strains. Five questions side by side, then each row in turn: the problem replayed on the right, then the usual fix drawn over it. Rows that are solved stay solved, and each fix links to its place on the next screen.
+4. `/tour/language`: the same question on eight tool designs, one rung at a time, with a calculator and a query language you can grow feature by feature. Every stage fits one screen.
 5. `/tour/object`: the estate reshaped, step by step, into one plain object (two short lists of containers and one flat list of resources that point at each other by id), then the benchmark's reference program run over it for real, with a count of what it read and what went back to the model.
-6. `/tour/code`: a program run for real over the object, with its change set grouped by resource.
+6. `/tour/code`: the same stage, now with programs running on it: five questions (a sum, a write with a change set to approve, two the query language could not ask, and a narrow lookup the catalogue wins), each written, run and answered, and a last example in which you edit a program and try to break the contract.
+7. `/tour/results`: how the methods hold up as the model gets weaker, from a snapshot of the headless benchmark (80 runs a method on each of three models): the code surface stays at 80 of 80 while the others fall on an older model.
 
-Tool outputs come from the real handlers and the bill uses the benchmark's own accounting: an estimate of one token per four characters, split on every screen into what the model reads (text it already read on the turn before, called cached, plus new text) and what it writes. Every token is counted at full price, so the totals are tokens, not dollars; a provider with prompt caching would bill the cached part at roughly a tenth. The call sequences are scripted, so these screens show the shape of each approach, not a measurement.
+Tool outputs come from the real handlers and the bill uses the benchmark's own accounting: an estimate of one token per four characters, split on every screen into what the model reads (text it already read on the turn before, called cached, plus new text) and what it writes. Every token is counted at full price, so the totals are tokens, not dollars; a provider with prompt caching would bill the cached part at roughly a tenth. The call sequences are scripted, so screens 1 to 6 show the shape of each approach, not a measurement. Screen 7 is the exception: its figures are measured runs, and its dollars are estimates from the tokens the provider reported, not an invoice.
 
 [Try it locally](#try-it) · [Read example programs](docs/solution-path-examples.md) · [Run benchmarks](#running-benchmarks) · [Comparison scope](#what-this-comparison-tells-you)
 

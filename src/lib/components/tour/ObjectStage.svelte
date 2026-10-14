@@ -52,11 +52,12 @@
     code: string;
     blocks: ProgramBlocks;
     contract: ContractExcerpt;
-    descriptionTokens: number;
+    /** Size of the whole tool definition the model is sent, in tokens. */
+    definitionTokens: number;
     /** Fields stored on a resource that the object leaves out. */
     removedFields: string[];
   }
-  let { t, label, stage, trace, code, blocks, contract, descriptionTokens, removedFields }: Props = $props();
+  let { t, label, stage, trace, code, blocks, contract, definitionTokens, removedFields }: Props = $props();
 
   // ── derived from t ───────────────────────────────────────────────────────
   const poses = $derived(stage.glyphs.map((g) => poseAt(g, t)));
@@ -340,9 +341,9 @@
   <!-- ═════════ the tool description (left, step 4) ═════════ -->
   <g class="contract" opacity={contractA} pointer-events="none">
     <rect x={LEFT.x} y={LEFT.y} width={LEFT.w} height="332" rx="12" class="dark" />
-    <text x={LEFT.x + 18} y={LEFT.y + 25} class="dark-head">tool description, as sent to the model</text>
+    <text x={LEFT.x + 18} y={LEFT.y + 25} class="dark-head">tool definition, as sent to the model</text>
     <g transform="translate({LEFT.x + LEFT.w - 18} {LEFT.y + 10})">
-      <text x="0" y="15" text-anchor="end" class="dark-tag">{`\u2248 ${fmtTokens(descriptionTokens)} tokens in all`}</text>
+      <text x="0" y="15" text-anchor="end" class="dark-tag">{`\u2248 ${fmtTokens(definitionTokens)} tokens in all`}</text>
     </g>
     {#each shape as l, i (i)}
       <text x={LEFT.x + 24} y={LEFT.y + 66 + i * 22} class="code">{#each tokenizeLine(l.code) as tk, k (k)}<tspan class={tk.cls}>{tk.text}</tspan>{/each}{#if l.note}<tspan class="comment">{`  // ${l.note}`}</tspan>{/if}</text>
