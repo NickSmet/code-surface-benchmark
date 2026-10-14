@@ -55,8 +55,10 @@
 <style>
   .transport {
     display: flex;
+    /* On a phone the buttons, slider and label cannot share one row; the label drops below instead of pushing the page sideways. */
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 6px 12px;
     min-width: 0;
   }
   .btns {
@@ -100,7 +102,7 @@
     border-color: var(--color-brand-dark);
   }
   .slider {
-    flex: 1;
+    flex: 1 1 120px;
     min-width: 120px;
     accent-color: var(--color-brand);
     height: 24px;
@@ -113,5 +115,6 @@
     color: var(--color-text-secondary);
     white-space: nowrap;
     text-align: right;
+    margin-left: auto;
   }
 </style>
