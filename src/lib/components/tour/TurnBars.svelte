@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ReplayTurn } from '$lib/tour/replay';
+  import { PART_KEYS, promptSplit, type PartKey } from '$lib/tour/replay-view';
   import { fmtTokens } from '$lib/tour/tokens';
 
   interface Props {
@@ -15,29 +16,52 @@
   }
   let { turns, upTo, height = 150, fill = false, onturn }: Props = $props();
 
-  const SEGMENTS = [
-    { key: 'fixed', label: 'Instructions + tools', color: '#CBD5E1' },
-    { key: 'user', label: 'Question', color: '#94A3B8' },
-    { key: 'calls', label: 'Earlier calls', color: '#A5B4FC' },
-    { key: 'results', label: 'Earlier results', color: '#4F46E5' }
-  ] as const;
+  // Text that is new in a request is drawn in colour. Text the model already got in the
+  // request before is the same shape in grey: a provider with prompt caching can reuse it.
+  const FRESH: Record<PartKey, { label: string; color: string; hint: string }> = {
+    fixed: { label: 'Setup', color: '#475569', hint: 'Instructions and tool definitions' },
+    user: { label: 'Question', color: '#0ea5e9', hint: 'The question you asked' },
+    calls: { label: 'Call', color: '#a5b4fc', hint: 'The model\u2019s tool calls' },
+    results: { label: 'Result', color: '#4f46e5', hint: 'What the tools sent back' }
+  };
+  const CACHED: Record<PartKey, string> = { fixed: '#e5e9f0', user: '#d5dbe5', calls: '#c4ccda', results: '#aeb8ca' };
+  const CACHE_HINT =
+    'Same text as the previous request, so a provider with prompt caching can reuse it at a discount. The totals on this page assume no caching.';
+  const NAME: Record<PartKey, string> = { fixed: 'setup', user: 'question', calls: 'calls', results: 'results' };
 
   const max = $derived(Math.max(1, ...turns.map((t) => t.promptTokens)));
   const dense = $derived(turns.length > 12);
 
-  function parts(t: ReplayTurn): Record<(typeof SEGMENTS)[number]['key'], number> {
-    return { fixed: t.parts.system + t.parts.tools, user: t.parts.user, calls: t.parts.calls, results: t.parts.results };
+  interface Seg {
+    key: PartKey;
+    tokens: number;
+    cached: boolean;
+  }
+  /** Bottom to top: what was repeated, then what is new. */
+  function segments(i: number): Seg[] {
+    const s = promptSplit(turns, i);
+    const out: Seg[] = [];
+    for (const key of PART_KEYS) if (s.cached[key] > 0) out.push({ key, tokens: s.cached[key], cached: true });
+    for (const key of PART_KEYS) if (s.fresh[key] > 0) out.push({ key, tokens: s.fresh[key], cached: false });
+    return out;
   }
   function pct(n: number): string {
     return `${(n / max) * 100}%`;
   }
-  function tip(t: ReplayTurn): string {
-    const p = parts(t);
-    return `Turn ${t.n} sends ${t.promptTokens.toLocaleString('en-US')} tokens: ${p.fixed.toLocaleString('en-US')} instructions and tool definitions, ${p.user.toLocaleString('en-US')} question, ${p.calls.toLocaleString('en-US')} earlier calls, ${p.results.toLocaleString('en-US')} earlier results.`;
+  const n = (v: number): string => v.toLocaleString('en-US');
+  function tip(t: ReplayTurn, i: number): string {
+    const s = promptSplit(turns, i);
+    const list = (p: Record<PartKey, number>): string =>
+      PART_KEYS.filter((k) => p[k] > 0)
+        .map((k) => `${n(p[k])} ${NAME[k]}`)
+        .join(', ');
+    const head = `Turn ${t.n} sends ${n(t.promptTokens)} tokens.`;
+    if (s.cachedTokens === 0) return `${head} All of it is new: ${list(s.fresh)}.`;
+    return `${head} ${n(s.cachedTokens)} cached, the same as the previous request (${list(s.cached)}). ${n(s.freshTokens)} new (${list(s.fresh)}).`;
   }
-  const showTick = (n: number): boolean => !dense || n === 1 || n === turns.length || n % 5 === 0;
+  const showTick = (k: number): boolean => !dense || k === 1 || k === turns.length || k % 5 === 0;
   const summary = $derived(
-    `Tokens sent to the model on each of ${turns.length} turns: ${turns.map((t) => t.promptTokens.toLocaleString('en-US')).join(', ')}.`
+    `Tokens sent to the model on each of ${turns.length} turns: ${turns.map((t) => n(t.promptTokens)).join(', ')}. Grey is repeated from the previous turn.`
   );
 </script>
 
@@ -45,25 +69,30 @@
   <div class="plot" style:height={fill ? undefined : `${height}px`} role="img" aria-label={summary}>
     <span class="ymax" aria-hidden="true">{fmtTokens(max)}</span>
     <div class="bars" class:dense>
-      {#each turns as t (t.n)}
-        {@const p = parts(t)}
+      {#each turns as t, i (t.n)}
         {@const solid = t.n <= upTo}
+        {@const segs = solid ? segments(i) : []}
+        {@const total = segs.reduce((sum, s) => sum + s.tokens, 0)}
         <button
           type="button"
           class="col"
           class:ghost={!solid}
           class:now={t.n === upTo}
           style:height={pct(t.promptTokens)}
-          title={tip(t)}
-          aria-label={tip(t)}
+          title={tip(t, i)}
+          aria-label={tip(t, i)}
           onclick={() => onturn?.(t.n)}
           disabled={!onturn}
         >
-          {#if solid}
-            {#each SEGMENTS as s (s.key)}
-              <span class="seg" style:height={`${(p[s.key] / t.promptTokens) * 100}%`} style:background={s.color}></span>
-            {/each}
-          {/if}
+          {#each segs as s, si (`${s.cached ? 'c' : 'n'}-${s.key}`)}
+            <span
+              class="seg"
+              class:cached={s.cached}
+              class:top={si === segs.length - 1}
+              style:height={`${(s.tokens / total) * 100}%`}
+              style:background-color={s.cached ? CACHED[s.key] : FRESH[s.key].color}
+            ></span>
+          {/each}
           {#if t.n === upTo || (!dense && solid)}
             <span class="val" aria-hidden="true">{fmtTokens(t.promptTokens)}</span>
           {/if}
@@ -77,9 +106,11 @@
     {/each}
   </div>
   <figcaption class="legend">
-    {#each SEGMENTS as s (s.key)}
-      <span class="lg"><span class="sw" style:background={s.color}></span>{s.label}</span>
+    <span class="lg-h">New</span>
+    {#each PART_KEYS as k (k)}
+      <span class="lg" title={FRESH[k].hint}><span class="sw" style:background-color={FRESH[k].color}></span>{FRESH[k].label}</span>
     {/each}
+    <span class="lg cache" title={CACHE_HINT}><span class="sw hatch" style:background-color={CACHED.calls}></span>Cached</span>
   </figcaption>
 </figure>
 
@@ -152,9 +183,19 @@
     display: block;
     width: 100%;
     flex: none;
+    /* A hairline between parts that takes no room, so thin parts keep their height. */
+    box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.9);
   }
-  .seg:last-child {
+  .seg:first-child {
+    box-shadow: none;
+  }
+  .seg.top {
     border-radius: 3px 3px 0 0;
+  }
+  /* Cached text: the same grey family, lightly hatched so it does not depend on colour alone. */
+  .seg.cached,
+  .sw.hatch {
+    background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.55) 0 2px, transparent 2px 6px);
   }
   .val {
     position: absolute;
@@ -192,14 +233,28 @@
   .legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 1px 12px;
+    align-items: center;
+    gap: 1px 11px;
     font-size: 12px;
     color: var(--color-text-muted);
+  }
+  .lg-h {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
   }
   .lg {
     display: inline-flex;
     align-items: center;
     gap: 5px;
+  }
+  .lg.cache {
+    margin-left: 4px;
+    padding-left: 11px;
+    border-left: 1px solid var(--color-border-strong);
+    cursor: help;
   }
   .sw {
     width: 10px;
