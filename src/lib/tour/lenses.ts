@@ -47,11 +47,16 @@ const TYPE_SHORT: Record<ResourceType, string> = {
   appService: 'App service'
 };
 
-const TYPE_COLOR: Record<ResourceType, string> = {
+/**
+ * One colour per kind. Disks are a deliberately dark slate: a greyed-out VM
+ * (faded, deallocated, untouched) is a pale grey square, and a disk must never
+ * be mistaken for one.
+ */
+export const TYPE_COLOR: Record<ResourceType, string> = {
   virtualMachine: '#334155',
   networkInterface: '#38BDF8',
   publicIp: '#F59E0B',
-  disk: '#94A3B8',
+  disk: '#64748B',
   storageAccount: '#D946EF',
   sqlDatabase: '#F97316',
   appService: '#84CC16'

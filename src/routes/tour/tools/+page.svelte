@@ -300,6 +300,7 @@
       {labelOf}
       badgeOf={(u) => stepBadge(u, marks)}
       selectedId={pinnedId}
+      {focusId}
       onselect={select}
       onhover={(id) => (hoverId = id)}
       label="Estate map showing what the model has touched so far"

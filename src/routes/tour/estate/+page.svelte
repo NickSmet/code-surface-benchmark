@@ -105,12 +105,16 @@
     pinnedId = pinnedId === id ? null : id;
   }
 
+  // A VM is its whole pod: if the question needs the VM, its NIC, IP and disks are not faded.
+  const needUnits = $derived(
+    new Set(needle ? [...needle.resourceIds].map((id) => model.unitIdOf.get(id)).filter((u): u is string => !!u) : [])
+  );
+
   function paintOf(id: string): Paint {
     if (dumped) {
       const p: Paint = { fill: COLORS.read };
       if (needle?.resourceIds.has(id)) {
-        p.ring = COLORS.needle;
-        p.ringStyle = 'dashed';
+        p.needle = true;
         // Pulse once so the needle can be found in the haystack.
         p.fresh = true;
       }
@@ -121,12 +125,8 @@
     const p: Paint = { fill: cell.fill };
     if (legendKey && cell.key !== legendKey) p.dim = true;
     if (needle) {
-      if (needle.resourceIds.has(id)) {
-        p.ring = COLORS.needle;
-        p.ringStyle = 'dashed';
-      } else {
-        p.faint = true;
-      }
+      if (needle.resourceIds.has(id)) p.needle = true;
+      else if (!needUnits.has(model.unitIdOf.get(id) ?? '')) p.faint = true;
     }
     return p;
   }
@@ -638,7 +638,7 @@
   }
   .g {
     justify-self: center;
-    background: #94a3b8;
+    background: #64748b;
   }
   .g-vm {
     width: 18px;

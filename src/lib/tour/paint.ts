@@ -9,9 +9,14 @@ import { dominantKind, type TouchKind, type TouchMark } from './touch';
 export interface Paint {
   /** Cell background. Omit for the neutral base. */
   fill?: string;
-  /** Outline colour (scan ring, needle). */
+  /** Outline colour (scan ring). */
   ring?: string;
   ringStyle?: 'solid' | 'dashed';
+  /**
+   * The question depends on this resource. The map draws it as a dashed outline
+   * around the whole pod (a VM is its NIC, IP and disks, not just the square).
+   */
+  needle?: boolean;
   /** Fade the cell out hard (legend emphasis: "everything that is not this"). */
   dim?: boolean;
   /** Fade the cell out softly (the question does not need this resource). */
@@ -47,7 +52,7 @@ export const KIND_HINT: Record<TouchKind, string> = {
 export interface TouchPaintOptions {
   /** Highlight only this kind; everything else fades. */
   emphasis?: TouchKind | null;
-  /** Resources the question actually needs (drawn as a dashed outline). */
+  /** Resources the question actually needs (drawn as a dashed outline round the pod). */
   needle?: ReadonlySet<string>;
   /** Step that is currently being shown, to flag its resources as fresh. */
   currentStep?: number;
@@ -64,11 +69,9 @@ export function touchPaint(resourceId: string, mark: TouchMark | undefined, opts
     paint.ring = COLORS.scanned;
     paint.ringStyle = 'solid';
   }
-  if (opts.needle?.has(resourceId)) {
-    // The needle outline wins over the scan ring so it stays visible on a teal haze.
-    paint.ring = COLORS.needle;
-    paint.ringStyle = 'dashed';
-  }
+  // The needle is its own flag, not a ring: the map outlines the whole pod, so it
+  // stays visible on top of a scan ring instead of replacing it.
+  if (opts.needle?.has(resourceId)) paint.needle = true;
   if (opts.emphasis) {
     const has = mark?.[opts.emphasis] !== undefined;
     if (!has) paint.dim = true;

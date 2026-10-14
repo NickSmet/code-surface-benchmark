@@ -23,7 +23,10 @@
     badgeOf?: (unit: EstateUnit) => string | null;
     /** Accessible name for a unit. */
     labelOf?: (unit: EstateUnit) => string;
+    /** The pinned unit: strongest highlight. */
     selectedId?: string | null;
+    /** The unit being discussed right now (a step, a preview): highlighted like a hover. */
+    focusId?: string | null;
     onselect?: (unitId: string | null) => void;
     onhover?: (unitId: string | null) => void;
     /** Accessible name for the whole map. */
@@ -37,6 +40,7 @@
     badgeOf,
     labelOf,
     selectedId = null,
+    focusId = null,
     onselect,
     onhover,
     label = 'Estate map'
@@ -106,7 +110,7 @@
   const looseOf = (g: EstateGroup): EstateUnit[] => g.units.filter((u) => u.kind !== 'vm');
 </script>
 
-{#snippet cell(id: string, role: string, name: string)}
+{#snippet cell(id: string, role: string, name: string, podNeedle: boolean)}
   {@const p = paintOf(id)}
   <span
     class="cell"
@@ -116,6 +120,7 @@
     data-role={role}
     data-name={name}
     data-ring={p.ring ? (p.ringStyle ?? 'solid') : undefined}
+    data-needle={p.needle && !podNeedle ? '' : undefined}
     style:--fill={p.fill}
     style:--ring={p.ring}
   ></span>
@@ -124,7 +129,7 @@
 <div class="estate-wrap">
   <div class="estate" bind:this={root} role="group" aria-label={label}>
     {#each model.subscriptions as sub (sub.id)}
-      <section class="band" aria-label={`Subscription ${sub.name}`}>
+      <section class="band" style:--n={sub.groups.length} aria-label={`Subscription ${sub.name}`}>
         <header class="band-head">
           <h2 class="band-name">{sub.name}</h2>
           <span class="band-meta">
@@ -156,11 +161,15 @@
                   {@const disks = u.members.filter((m) => !TOP_ROLES.has(m.role))}
                   {@const hasPip = u.members.some((m) => m.role === 'pip')}
                   {@const badge = badgeOf?.(u) ?? null}
+                  <!-- The VM is the whole pod. A needle on its head outlines the pod, not just the square. -->
+                  {@const podNeedle = paintOf(u.id).needle === true}
                   <button
                     type="button"
                     class="unit pod"
                     class:selected={selectedId === u.id}
+                    class:focus={focusId === u.id && selectedId !== u.id}
                     data-unit={u.id}
+                    data-needle={podNeedle ? '' : undefined}
                     aria-label={labelOf?.(u) ?? defaultLabel(u)}
                     aria-pressed={selectedId === u.id}
                     tabindex={tabStop === u.id ? 0 : -1}
@@ -176,13 +185,13 @@
                   >
                     <span class="pod-top">
                       {#each top as m (m.id)}
-                        {@render cell(m.id, m.role, m.name)}
+                        {@render cell(m.id, m.role, m.name, podNeedle)}
                       {/each}
                       {#if !hasPip}<span class="cell slot" aria-hidden="true"></span>{/if}
                     </span>
                     <span class="pod-disks">
                       {#each disks as m (m.id)}
-                        {@render cell(m.id, m.role, m.name)}
+                        {@render cell(m.id, m.role, m.name, podNeedle)}
                       {/each}
                     </span>
                     {#if badge}<span class="badge">{badge}</span>{/if}
@@ -199,7 +208,9 @@
                       type="button"
                       class="unit loose"
                       class:selected={selectedId === u.id}
+                      class:focus={focusId === u.id && selectedId !== u.id}
                       data-unit={u.id}
+                      data-needle={p.needle ? '' : undefined}
                       data-kind={u.kind}
                       aria-label={labelOf?.(u) ?? defaultLabel(u)}
                       aria-pressed={selectedId === u.id}
@@ -248,17 +259,40 @@
 
 <style>
   .estate-wrap {
-    container-type: inline-size;
+    container: estate / inline-size;
     width: 100%;
   }
   .estate {
     /* Everything is sized in `u`, which follows the container width: a laptop
        gets small-but-legible pods, a projector gets big ones. */
-    --u: clamp(6.5px, calc((100cqw - 4px) / 98), 12.5px);
+    --u: clamp(6.5px, calc((100cqw - 4px) / 100), 12.5px);
     --link: var(--color-border-strong);
+    --needle: #0f172a;
     display: flex;
     flex-direction: column;
     gap: calc(var(--u) * 2.2);
+  }
+  /* Room for it: both subscriptions side by side, so all six resource groups
+     are in view at once and the whole estate is about as tall as one band.
+     u is solved so that three pods fit across every group card. */
+  @container estate (min-width: 1120px) {
+    .estate {
+      --u: clamp(7px, calc((100cqw - 14px) / 156), 12.5px);
+      flex-direction: row;
+      align-items: stretch;
+      gap: calc(var(--u) * 1.6);
+    }
+    .band {
+      display: flex;
+      flex: var(--n, 3) 1 0;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .groups {
+      flex: 1;
+      grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
+      align-items: stretch;
+    }
   }
 
   /* ── bands & groups ─────────────────────────────────────────────── */
@@ -341,33 +375,52 @@
   .pods {
     display: flex;
     flex-wrap: wrap;
-    gap: calc(var(--u) * 0.55);
+    gap: calc(var(--u) * 0.7);
   }
   .unit {
+    --hl: var(--color-brand);
     position: relative;
     display: inline-flex;
     border: 1px solid var(--color-border-default);
+    border-radius: var(--r);
     background: white;
-    transition: border-color 0.12s, box-shadow 0.12s;
+    transition: border-color 0.12s, box-shadow 0.12s, background-color 0.12s;
   }
-  .unit:hover {
-    border-color: var(--color-text-dim);
+  /* The highlight frames the whole pod (square, NIC, IP and disks), never one
+     cell: the VM is all of it, and the square is only its core. */
+  .unit:hover,
+  .unit.focus {
+    border-color: var(--hl);
+    box-shadow: 0 0 0 1px var(--hl);
   }
   .unit.selected {
-    border-color: var(--color-brand);
-    box-shadow: 0 0 0 2px var(--color-brand);
+    border-color: var(--hl);
+    box-shadow: 0 0 0 2px var(--hl);
+    background: var(--color-brand-bg);
   }
   .unit:focus-visible {
-    outline: 2px solid var(--color-brand);
-    outline-offset: 2px;
+    border-color: var(--hl);
+    box-shadow: 0 0 0 1px var(--hl);
+    outline: 2px solid var(--hl);
+    outline-offset: 3px;
+  }
+  /* What the question needs: a dashed frame round the whole pod. It is a pseudo
+     element, not an outline, so it can sit beside the focus ring. */
+  .unit[data-needle]::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border: 2px dashed var(--needle);
+    border-radius: calc(var(--r) + 3px);
+    pointer-events: none;
   }
 
   .pod {
+    --r: calc(var(--u) * 0.9);
     flex-direction: column;
     gap: calc(var(--u) * 0.45);
     padding: calc(var(--u) * 0.6);
     min-width: calc(var(--u) * 6.9);
-    border-radius: calc(var(--u) * 0.9);
   }
   .pod-top {
     display: flex;
@@ -393,6 +446,11 @@
   }
   .cell[data-ring='dashed'] {
     outline: calc(var(--u) * 0.18) dashed var(--ring);
+    outline-offset: calc(var(--u) * 0.2);
+  }
+  /* A needed resource whose pod head is not needed (e.g. a lone disk): outline the cell itself. */
+  .cell[data-needle] {
+    outline: calc(var(--u) * 0.18) dashed var(--needle);
     outline-offset: calc(var(--u) * 0.2);
   }
   .cell.faint {
@@ -461,7 +519,7 @@
   .loose-row {
     display: flex;
     flex-wrap: wrap;
-    gap: calc(var(--u) * 0.5);
+    gap: calc(var(--u) * 0.7);
   }
   .pods + .loose-row {
     margin-top: calc(var(--u) * 0.9);
@@ -469,7 +527,7 @@
     border-top: 1px dashed var(--color-border-default);
   }
   .loose {
-    border-radius: calc(var(--u) * 0.6);
+    --r: calc(var(--u) * 0.6);
     padding: calc(var(--u) * 0.4);
   }
   .loose-cell {
