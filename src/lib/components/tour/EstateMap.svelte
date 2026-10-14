@@ -274,10 +274,11 @@
   }
   /* Room for it: both subscriptions side by side, so all six resource groups
      are in view at once and the whole estate is about as tall as one band.
-     u is solved so that three pods fit across every group card. */
-  @container estate (min-width: 1120px) {
+     u is solved so that three pods fit across every group card (at 980px
+     that is u = 6.2px: small, but the pods still read as pods). */
+  @container estate (min-width: 980px) {
     .estate {
-      --u: clamp(7px, calc((100cqw - 14px) / 156), 12.5px);
+      --u: clamp(6px, calc((100cqw - 14px) / 156), 12.5px);
       flex-direction: row;
       align-items: stretch;
       gap: calc(var(--u) * 1.6);

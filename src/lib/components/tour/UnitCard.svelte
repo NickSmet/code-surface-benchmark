@@ -2,8 +2,8 @@
   import { AppWindow, Box, Database, Globe, HardDrive, Network, Server } from '@lucide/svelte';
   import type { EstateMember, EstateModel, EstateUnit, MemberRole } from '$lib/tour/estate';
   import { ROLE_LABEL, factOf } from '$lib/tour/facts';
-  import { KIND_LABEL } from '$lib/tour/paint';
-  import { TOUCH_KINDS, type MarkSet, type TouchKind } from '$lib/tour/touch';
+  import { KIND_LABEL, KIND_SHORT as SHORT } from '$lib/tour/paint';
+  import { TOUCH_KINDS, type MarkSet } from '$lib/tour/touch';
   import { fmtUsd } from '$lib/utils';
 
   interface Props {
@@ -17,8 +17,10 @@
     facts?: boolean;
     /** Tighter rows, for a strip rather than a sidebar. */
     dense?: boolean;
+    /** Show the type next to each name ("NIC", "OS disk"). Off, it stays available to screen readers. */
+    tags?: boolean;
   }
-  let { unit, model, marks = null, currentStep, facts = false, dense = false }: Props = $props();
+  let { unit, model, marks = null, currentStep, facts = false, dense = false, tags = true }: Props = $props();
 
   const ICON = { vm: Server, nic: Network, pip: Globe, osDisk: HardDrive, dataDisk: HardDrive, storage: Box, sql: Database, app: AppWindow, other: Box };
   const INDENT: Partial<Record<MemberRole, number>> = { nic: 1, pip: 2, osDisk: 1, dataDisk: 1 };
@@ -33,8 +35,6 @@
     app: 'app service',
     other: ''
   };
-  const SHORT: Record<TouchKind, string> = { listed: 'summary', read: 'full read', scanned: 'scanned', written: 'changed' };
-
   function fieldsLine(fields: string[]): string {
     const shown = fields.slice(0, 6).join(', ');
     return fields.length > 6 ? `${shown} +${fields.length - 6}` : shown;
@@ -62,7 +62,7 @@
       <span class="body">
         <span class="line">
           <span class="name">{m.name}</span>
-          {#if TAG[m.role]}<span class="tag">{TAG[m.role]}</span>{/if}
+          {#if TAG[m.role]}<span class="tag" class:sr={!tags}>{TAG[m.role]}</span>{/if}
         </span>
         {#if facts}<span class="fact">{factOf(r)}</span>{/if}
         {#if mark && mark.fields.length > 0}
@@ -116,6 +116,8 @@
     gap: 2px;
   }
   .dense .row {
+    /* The name takes what it needs; touch chips take the rest and wrap rather than squeeze it. */
+    grid-template-columns: auto auto minmax(0, 1fr);
     gap: 8px;
     padding: 2px 8px;
     margin-left: calc(var(--indent, 0) * 14px);
@@ -159,6 +161,13 @@
     font-size: 12px;
     color: var(--color-text-muted);
     white-space: nowrap;
+  }
+  .tag.sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
   }
   .fact {
     font-size: 12.5px;

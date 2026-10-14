@@ -42,6 +42,14 @@ export const KIND_LABEL: Record<TouchKind, string> = {
   written: 'Changed'
 };
 
+/** The same four words on the legend chips and on a pod's rows. */
+export const KIND_SHORT: Record<TouchKind, string> = {
+  listed: 'summary',
+  read: 'full read',
+  scanned: 'scanned',
+  written: 'changed'
+};
+
 export const KIND_HINT: Record<TouchKind, string> = {
   listed: 'A one-line summary of the resource entered the model\u2019s context.',
   read: 'The whole record entered the model\u2019s context.',

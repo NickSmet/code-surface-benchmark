@@ -6,17 +6,20 @@
     turns: ReplayTurn[];
     /** Turns up to and including this one are solid; later turns are dashed ghosts. */
     upTo: number;
+    /** Fixed plot height in px. Ignored when `fill` is set. */
     height?: number;
+    /** Take whatever height the parent gives (the parent must be a flex column with a bounded height). */
+    fill?: boolean;
     /** Click a bar to jump to that turn. */
     onturn?: (turn: number) => void;
   }
-  let { turns, upTo, height = 150, onturn }: Props = $props();
+  let { turns, upTo, height = 150, fill = false, onturn }: Props = $props();
 
   const SEGMENTS = [
-    { key: 'fixed', label: 'Instructions + tool definitions', color: '#CBD5E1' },
-    { key: 'user', label: 'Your question', color: '#94A3B8' },
-    { key: 'calls', label: 'Model\u2019s earlier tool calls', color: '#A5B4FC' },
-    { key: 'results', label: 'Earlier tool results', color: '#4F46E5' }
+    { key: 'fixed', label: 'Instructions + tools', color: '#CBD5E1' },
+    { key: 'user', label: 'Question', color: '#94A3B8' },
+    { key: 'calls', label: 'Earlier calls', color: '#A5B4FC' },
+    { key: 'results', label: 'Earlier results', color: '#4F46E5' }
   ] as const;
 
   const max = $derived(Math.max(1, ...turns.map((t) => t.promptTokens)));
@@ -38,8 +41,8 @@
   );
 </script>
 
-<figure class="chart">
-  <div class="plot" style:height="{height}px" role="img" aria-label={summary}>
+<figure class="chart" class:fill>
+  <div class="plot" style:height={fill ? undefined : `${height}px`} role="img" aria-label={summary}>
     <span class="ymax" aria-hidden="true">{fmtTokens(max)}</span>
     <div class="bars" class:dense>
       {#each turns as t (t.n)}
@@ -73,13 +76,10 @@
       <span class="tick">{showTick(t.n) ? t.n : ''}</span>
     {/each}
   </div>
-  <figcaption class="axes">
-    <span>Model turn</span>
-    <span class="legend">
-      {#each SEGMENTS as s (s.key)}
-        <span class="lg"><span class="sw" style:background={s.color}></span>{s.label}</span>
-      {/each}
-    </span>
+  <figcaption class="legend">
+    {#each SEGMENTS as s (s.key)}
+      <span class="lg"><span class="sw" style:background={s.color}></span>{s.label}</span>
+    {/each}
   </figcaption>
 </figure>
 
@@ -88,13 +88,21 @@
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
+  }
+  .chart.fill {
+    height: 100%;
+    min-height: 0;
   }
   .plot {
     position: relative;
-    padding-top: 22px;
+    padding-top: 20px;
     border-bottom: 1px solid var(--color-border-strong);
+  }
+  .fill .plot {
+    flex: 1 1 0;
+    min-height: 64px;
   }
   .ymax {
     position: absolute;
@@ -170,6 +178,7 @@
     text-align: center;
     font-family: var(--font-mono);
     font-size: 12px;
+    line-height: 1.3;
     color: var(--color-text-muted);
   }
   .xaxis.dense {
@@ -180,27 +189,21 @@
     overflow: visible;
     white-space: nowrap;
   }
-  .axes {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 4px 16px;
-    font-size: 12.5px;
-    color: var(--color-text-muted);
-  }
   .legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px 14px;
+    gap: 1px 12px;
+    font-size: 12px;
+    color: var(--color-text-muted);
   }
   .lg {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
   }
   .sw {
-    width: 11px;
-    height: 11px;
+    width: 10px;
+    height: 10px;
     border-radius: 3px;
   }
 </style>
