@@ -426,7 +426,7 @@
             {#if turn.calls.length > 0}
               {@const key = `turn-${turn.n}`}
               {@const dense = turn.calls.length > 6}
-              <AccItem id={key} open={openKey === key} ontoggle={toggleItem} current={autoKey === key}>
+              <AccItem id={key} scrolls open={openKey === key} ontoggle={toggleItem} current={autoKey === key}>
                 {#snippet head()}
                   <span class="h-t">Turn {turn.n}</span>
                   <span class="h-m">{callNames(turn.calls.filter((c) => c.step <= f))}</span>
@@ -646,7 +646,7 @@
     overflow: auto;
   }
   /* Many turns: keep the open turn readable (it carries the long result) and let the list scroll instead. */
-  .acc-list.crowded :global(.acc.open[data-acc^='turn-']) {
+  .acc-list.crowded :global(.acc.open.scrolls) {
     min-height: 190px;
   }
 

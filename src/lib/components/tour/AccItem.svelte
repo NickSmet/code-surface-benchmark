@@ -11,12 +11,17 @@
     tone?: 'plain' | 'you' | 'answer';
     /** The playhead is inside this item. */
     current?: boolean;
+    /**
+     * The body can be taller than the room it gets and scrolls inside the item.
+     * Without it the open item is exactly as tall as its content and never shrinks.
+     */
+    scrolls?: boolean;
     /** One line, always visible. */
     head: Snippet;
     /** Only rendered while open. */
     children: Snippet;
   }
-  let { id, open, ontoggle, tone = 'plain', current = false, head, children }: Props = $props();
+  let { id, open, ontoggle, tone = 'plain', current = false, scrolls = false, head, children }: Props = $props();
 
   // WAI-ARIA accordion: up/down move between headers of the same list.
   function onkeydown(e: KeyboardEvent): void {
@@ -32,7 +37,7 @@
   }
 </script>
 
-<section class="acc" class:open class:current data-tone={tone} data-acc={id}>
+<section class="acc" class:open class:current class:scrolls data-tone={tone} data-acc={id}>
   <h3 class="h">
     <button type="button" class="btn" id="acc-btn-{id}" data-acc-btn aria-expanded={open} aria-controls="acc-{id}" {onkeydown} onclick={() => ontoggle(id)}>
       <ChevronRight class="chev" size={14} strokeWidth={2.4} />
@@ -56,10 +61,13 @@
     transition: border-color 0.12s, background 0.12s;
   }
   .acc.open {
-    /* The open item is as tall as its content. When the list is too short for that,
-       it is the only thing that shrinks: its body scrolls, its header never does. */
-    flex: 0 1 auto;
+    /* As tall as its content, and never squashed: a header must always stay visible. */
+    flex: none;
     border-color: var(--color-border-strong);
+  }
+  .acc.open.scrolls {
+    /* Long content: when the list is too short, this item shrinks and its body scrolls. */
+    flex: 0 1 auto;
   }
   .acc.current {
     /* An inset bar, not a thicker border, so nothing shifts when the playhead moves. */
