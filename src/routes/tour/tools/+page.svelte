@@ -3,10 +3,11 @@
   import { page } from '$app/state';
   import { browser } from '$app/environment';
   import { replaceState } from '$app/navigation';
-  import { Bot, User, Wrench, X } from '@lucide/svelte';
+  import { Bot, Play, User, Wrench, X } from '@lucide/svelte';
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { CATALOG_TOOLS } from '$lib/surfaces/catalog/schemas';
   import { TASKS } from '$lib/tasks';
+  import AccItem from '$lib/components/tour/AccItem.svelte';
   import EstateMap, { type GroupPaint } from '$lib/components/tour/EstateMap.svelte';
   import Segmented from '$lib/components/tour/Segmented.svelte';
   import StatTile from '$lib/components/tour/StatTile.svelte';
@@ -19,6 +20,7 @@
   import { buildEstateModel } from '$lib/tour/estate';
   import { needleFor } from '$lib/tour/needles';
   import { COLORS, touchPaint, type Paint } from '$lib/tour/paint';
+  import type { ReplayCall } from '$lib/tour/replay';
   import { argsLine, billedAt, callSummary, costFacts, lastFrame, stepBadge, turnAt } from '$lib/tour/replay-view';
   import { CATALOG_ROUTES, replayCatalog, taskPrompt } from '$lib/tour/scenarios';
   import { countMarks, marksAt, type TouchKind } from '$lib/tour/touch';
@@ -59,19 +61,22 @@
   let hoverStep = $state<number | null>(null);
   let hoverId = $state<string | null>(null);
   let pinnedId = $state<string | null>(null);
-  // The pod the current call touched (when it touched exactly one), so the step is shown zoomed in.
-  const autoId = $derived.by(() => {
-    if (!call) return null;
+
+  // The pods the current call touched. When it is exactly one, the step is shown zoomed in.
+  const callUnits = $derived.by(() => {
     const ids = new Set<string>();
-    for (const t of call.touches) {
-      const u = t.resourceId ? model.unitIdOf.get(t.resourceId) : undefined;
-      if (u) ids.add(u);
+    if (call) {
+      for (const t of call.touches) {
+        const u = t.resourceId ? model.unitIdOf.get(t.resourceId) : undefined;
+        if (u) ids.add(u);
+      }
     }
-    return ids.size === 1 ? [...ids][0] : null;
+    return ids;
   });
+  const autoId = $derived(callUnits.size === 1 ? [...callUnits][0] : null);
   const focusId = $derived(pinnedId ?? hoverId ?? autoId);
 
-  let scroller = $state<HTMLElement | null>(null);
+  let accList = $state<HTMLElement | null>(null);
 
   // ── the replay ─────────────────────────────────────────────────────
   const routes = $derived(CATALOG_ROUTES[taskId]);
@@ -94,15 +99,40 @@
   const setup = $derived({ system: replay.turns[0].parts.system, tools: replay.turns[0].parts.tools });
 
   const nameOf = (id: string): string => model.resourceById.get(id)?.name ?? id;
-  const frameLabel = $derived(f === 0 ? 'Question' : f === last ? 'Answer' : `Step ${f} / ${replay.calls.length}`);
+  const frameLabel = $derived(
+    f === 0 ? 'Question' : f === last ? 'Answer' : `Step ${f}/${replay.calls.length} \u00b7 turn ${turnNow}/${replay.turns.length}`
+  );
   const valueText = $derived(
     f === 0 ? 'The question has been asked' : f === last ? 'The model writes its answer' : `Step ${f} of ${replay.calls.length}: ${call?.name ?? ''}`
   );
+  // Read aloud by screen readers on every step; not drawn.
   const caption = $derived.by(() => {
     if (f === 0) return 'The model has the question and nothing else. No resource has been touched.';
-    if (call) return `${call.name}: ${callSummary(call, nameOf)}`;
+    if (call) return `Step ${f}, ${call.name}: ${callSummary(call, nameOf)}`;
     return `The model writes the answer. It touched ${counts.touched} resources to get there; the question needed ${needleCount}.`;
   });
+
+  // ── the transcript accordion ───────────────────────────────────────
+  // One item is open at a time. By default it is wherever the playhead is; opening
+  // another is remembered only until the playhead moves.
+  const autoKey = $derived(f === 0 ? 'you' : f >= last ? 'answer' : `turn-${turnNow}`);
+  let manual = $state<{ key: string; at: number } | null>(null);
+  const openKey = $derived(manual && manual.at === f ? manual.key : autoKey);
+
+  function toggleItem(key: string): void {
+    if (playing) {
+      playing = false;
+      syncUrl();
+    }
+    manual = { key: openKey === key ? '' : key, at: f };
+  }
+
+  /** "get_resource ×3", "list_resources, get_resource ×19". */
+  function callNames(calls: ReplayCall[]): string {
+    const counts = new Map<string, number>();
+    for (const c of calls) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
+    return [...counts].map(([n, k]) => (k > 1 ? `${n} \u00d7${k}` : n)).join(', ');
+  }
 
   // ── actions ────────────────────────────────────────────────────────
   function syncUrl(): void {
@@ -121,6 +151,7 @@
 
   function setFrame(n: number): void {
     playing = false;
+    manual = null;
     frame = Math.max(0, Math.min(last, n));
     syncUrl();
   }
@@ -135,6 +166,7 @@
       setFrame(last);
       return;
     }
+    manual = null;
     if (f >= last) frame = 0;
     playing = true;
   }
@@ -145,6 +177,7 @@
     frame = 0;
     playing = false;
     pinnedId = null;
+    manual = null;
     syncUrl();
   }
   function setRoute(id: string): void {
@@ -152,12 +185,14 @@
     batch = 'all';
     frame = Infinity;
     playing = false;
+    manual = null;
     syncUrl();
   }
   function setBatch(id: Batch): void {
     batch = id;
     frame = Infinity;
     playing = false;
+    manual = null;
     syncUrl();
   }
   function jumpToTurn(n: number): void {
@@ -182,23 +217,30 @@
     return () => clearInterval(id);
   });
 
-  // Keep the newest transcript entry in view, scrolling only the transcript.
+  /** Scroll `box` (and only `box`) just enough to show `el`; when `el` is taller than the box, show its top. */
+  function reveal(box: HTMLElement, el: HTMLElement, pad = 6): void {
+    const b = box.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    if (r.height + 2 * pad >= b.height || r.top < b.top + pad) box.scrollTop += r.top - b.top - pad;
+    else if (r.bottom > b.bottom - pad) box.scrollTop += r.bottom - b.bottom + pad;
+  }
+
+  // Keep the open item, and the current call inside it, in view.
   $effect(() => {
+    void openKey;
     void f;
     void replay;
     void tick().then(() => {
-      const sc = scroller;
-      if (!sc) return;
-      if (f === 0) {
-        sc.scrollTop = 0;
-        return;
-      }
-      const el = sc.querySelector<HTMLElement>('[data-current]') ?? sc.querySelector<HTMLElement>('[data-tail]');
-      if (!el) return;
-      const top = el.offsetTop;
-      const bottom = top + el.offsetHeight;
-      if (bottom > sc.scrollTop + sc.clientHeight) sc.scrollTop = bottom - sc.clientHeight + 14;
-      else if (top < sc.scrollTop) sc.scrollTop = Math.max(0, top - 14);
+      const list = accList;
+      if (!list) return;
+      const item = list.querySelector<HTMLElement>(`[data-acc="${openKey}"]`);
+      if (!item) return;
+      reveal(list, item);
+      const body = item.querySelector<HTMLElement>('[role=region]');
+      if (!body) return;
+      const el = body.querySelector<HTMLElement>('[data-current]') ?? body.querySelector<HTMLElement>('[data-tail]');
+      if (el) reveal(body, el);
+      else body.scrollTop = 0;
     });
   });
 
@@ -238,7 +280,7 @@
 
   function onWindowKey(e: KeyboardEvent): void {
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-    const t = e.target as HTMLElement | null;
+    const t = e.target instanceof HTMLElement ? e.target : null;
     if (t?.closest('input, textarea, select, [role=radio], [role=tab], [data-unit]') || t?.isContentEditable) return;
     if (e.key === 'ArrowRight') setFrame(f + 1);
     else if (e.key === 'ArrowLeft') setFrame(f - 1);
@@ -256,93 +298,140 @@
 </svelte:head>
 <svelte:window onkeydown={onWindowKey} />
 
-<header class="head">
-  <div class="head-text">
-    <p class="t-kicker">② Naive tools</p>
-    <h1 class="t-h1">A question, answered one tool call at a time.</h1>
-    <p class="t-lead">{route.lesson}</p>
-  </div>
-  <section class="t-panel t-panel-pad picker" aria-label="Question">
-    <span class="ctl-label">Question</span>
+<div class="screen">
+  <header class="top">
+    <h1 class="t-h1">One tool call at a time.</h1>
     <Segmented
       label="Question"
+      size="sm"
       value={taskId}
       onchange={setTask}
       accent="var(--color-brand)"
       options={TASK_IDS.map((id) => ({ id, label: SHORT[id], title: TASKS.find((t) => t.id === id)?.description }))}
     />
-  </section>
-</header>
+    <TourNav prev={{ href: '/tour/estate', label: 'The estate' }} next={{ href: '/tour/language', label: 'A language' }} />
+    <p class="t-lead">{route.lesson}</p>
+  </header>
 
-<section class="t-panel bar" aria-label="Replay">
-  <Transport frame={f} {last} {playing} onframe={setFrame} onplay={togglePlay} {valueText} label={frameLabel} />
-  <div class="tiles">
-    <StatTile compact label="Calls" value={Math.min(f, replay.calls.length)} sub="of {replay.calls.length}" />
-    <StatTile compact label="Model turns" value={turnNow} sub="of {replay.turns.length}" />
-    <StatTile compact label="Resources touched" value={counts.touched} sub="the question needs {needleCount}" />
-    <StatTile compact label="Billed" value={'\u2248 ' + fmtTokens(billedNow)} sub="tokens, no caching" />
-  </div>
-</section>
-
-<div class="layout">
-  <section class="t-panel map-panel" aria-label="The estate, as touched so far">
-    <div class="legend-row">
-      <TouchLegend {counts} kinds={['listed', 'read', 'written']} bind:emphasis needle={{ count: needleCount }} />
+  <section class="t-panel run" aria-label="Replay">
+    <div class="run-transport">
+      <Transport frame={f} {last} {playing} onframe={setFrame} onplay={togglePlay} {valueText} label={frameLabel} />
     </div>
-    <p class="caption" role="status">
-      <span class="cap-step">{f === 0 ? 'Start' : f === last ? 'Answer' : `Step ${f}`}</span>
-      {caption}
-    </p>
-    <EstateMap
-      {model}
-      {paintOf}
-      {groupPaintOf}
-      {labelOf}
-      badgeOf={(u) => stepBadge(u, marks)}
-      selectedId={pinnedId}
-      {focusId}
-      onselect={select}
-      onhover={(id) => (hoverId = id)}
-      label="Estate map showing what the model has touched so far"
-    />
+    {#if routes.length > 1 || fanout}
+      <div class="variants">
+        {#if routes.length > 1}
+          <div class="variant">
+            <span class="v-label">Route</span>
+            <Segmented
+              label="Route"
+              size="sm"
+              value={route.id}
+              onchange={setRoute}
+              options={routes.map((r) => ({ id: r.id, label: r.label, title: r.hint }))}
+            />
+          </div>
+        {/if}
+        {#if fanout}
+          <div class="variant">
+            <span class="v-label">Calls per turn</span>
+            <Segmented label="Calls per turn" size="sm" value={batch} onchange={setBatch} options={BATCHES} />
+          </div>
+        {/if}
+      </div>
+    {/if}
   </section>
 
-  <aside class="side" aria-label="Transcript">
-    <div class="t-panel transcript">
-      <div class="tr-head">
-        <h2 class="t-h2">What the model is told, in order</h2>
-      </div>
-      <div class="scroller" bind:this={scroller}>
-        <article class="card setup">
-          <p class="kicker"><Wrench size={13} /> Setup, sent again on every turn</p>
-          <p class="text">
-            Instructions <strong>{fmtInt(setup.system)}</strong> + {toolNames.length} tool definitions <strong>{fmtInt(setup.tools)}</strong> =
-            <strong>{fmtTokens(setup.system + setup.tools)} tokens</strong> before the model reads a word of the question.
+  <p class="t-sr" role="status">{caption}</p>
+
+  <div class="stage">
+    <section class="t-panel map-panel" aria-label="The estate, as touched so far">
+      <TouchLegend short {counts} kinds={['listed', 'read', 'written']} bind:emphasis needle={{ count: needleCount }} />
+      <EstateMap
+        {model}
+        {paintOf}
+        {groupPaintOf}
+        {labelOf}
+        badgeOf={(u) => stepBadge(u, marks)}
+        selectedId={pinnedId}
+        {focusId}
+        onselect={select}
+        onhover={(id) => (hoverId = id)}
+        label="Estate map showing what the model has touched so far"
+      />
+    </section>
+
+    <aside class="t-panel podcard" aria-label="The pod in focus">
+      {#if unit}
+        <div class="pod-head">
+          <span class="t-kicker">{pinnedId ? 'Pinned' : hoverId ? 'Preview' : 'This step'}</span>
+          <h2 class="pod-name">{unit.name}</h2>
+          {#if pinnedId}
+            <button type="button" class="t-btn sm unpin" onclick={() => (pinnedId = null)}><X size={14} /> Unpin</button>
+          {/if}
+        </div>
+        <UnitCard {unit} {model} {marks} currentStep={f} dense tags={false} />
+      {:else}
+        <div class="pod-empty">
+          <p class="pe-title">
+            {#if f === 0}
+              Nothing touched yet
+            {:else if callUnits.size > 1}
+              This step touched {fmtInt(callUnits.size)} pods
+            {:else}
+              No single pod in focus
+            {/if}
+          </p>
+          <p class="pe-hint">Hover or click a pod to see how it was touched.</p>
+        </div>
+      {/if}
+    </aside>
+  </div>
+
+  <div class="convo">
+    <section class="t-panel transcript" aria-label="Transcript">
+      <div class="acc-list" data-acc-list bind:this={accList}>
+        <AccItem id="setup" open={openKey === 'setup'} ontoggle={toggleItem}>
+          {#snippet head()}
+            <Wrench size={13} />
+            <span class="h-t">Setup</span>
+            <span class="h-m prose">{fmtTokens(setup.system + setup.tools)} tokens, sent again on every turn</span>
+          {/snippet}
+          <p class="b-text">
+            Instructions <strong>{fmtInt(setup.system)}</strong> + {toolNames.length} tool definitions <strong>{fmtInt(setup.tools)}</strong>
+            tokens, before the model reads a word of the question.
           </p>
           <p class="chips">
             {#each toolNames as n (n)}<span class="t-chip">{n}</span>{/each}
           </p>
-        </article>
+        </AccItem>
 
-        <article class="card you">
-          <p class="kicker"><User size={13} /> You</p>
-          <p class="text">{taskPrompt(taskId)}</p>
-        </article>
+        <AccItem id="you" tone="you" open={openKey === 'you'} ontoggle={toggleItem} current={autoKey === 'you'}>
+          {#snippet head()}
+            <User size={13} />
+            <span class="h-t">You</span>
+            {#if openKey !== 'you'}<span class="h-m prose">{taskPrompt(taskId)}</span>{/if}
+          {/snippet}
+          <p class="b-text">{taskPrompt(taskId)}</p>
+          {#if f === 0}
+            <button type="button" class="t-btn primary sm start" onclick={togglePlay}><Play size={14} /> Play the run</button>
+          {/if}
+        </AccItem>
 
         {#each replay.turns as turn, ti (turn.n)}
           {@const started = turn.calls.length > 0 ? turn.calls[0].step <= f : f === last}
           {#if started}
             {@const prev = ti > 0 ? replay.turns[ti - 1].promptTokens : 0}
-            <section class="turn" aria-label="Turn {turn.n}">
-              <p class="turn-head">
-                <span class="turn-n">Turn {turn.n}</span>
-                <span class="turn-t">
-                  the model is sent <strong>{fmtTokens(turn.promptTokens)}</strong> tokens
-                  {#if ti > 0}<span class="delta">(+{fmtTokens(turn.promptTokens - prev)})</span>{/if}
-                </span>
-              </p>
-              {#if turn.calls.length > 0}
-                {@const dense = turn.calls.length > 6}
+            {#if turn.calls.length > 0}
+              {@const key = `turn-${turn.n}`}
+              {@const dense = turn.calls.length > 6}
+              <AccItem id={key} open={openKey === key} ontoggle={toggleItem} current={autoKey === key}>
+                {#snippet head()}
+                  <span class="h-t">Turn {turn.n}</span>
+                  <span class="h-m">{callNames(turn.calls.filter((c) => c.step <= f))}</span>
+                  <span class="h-r">
+                    {fmtTokens(turn.promptTokens)} tokens{#if ti > 0}<span class="delta"> +{fmtTokens(turn.promptTokens - prev)}</span>{/if}
+                  </span>
+                {/snippet}
                 <ol class="calls" class:dense>
                   {#each turn.calls as c (c.step)}
                     {#if c.step <= f}
@@ -358,16 +447,12 @@
                           aria-current={c.step === f ? 'step' : undefined}
                         >
                           <span class="num">{c.step}</span>
-                          <span class="main">
-                            <span class="tool">{c.name}</span>
-                            <span class="args">{argsLine(c.args)}</span>
-                          </span>
+                          <span class="tool">{c.name}</span>
+                          <span class="args">{argsLine(c.args)}</span>
                           <span class="tok">+{fmtTokens(c.resultTokens)}</span>
                         </button>
-                        {#if !dense || c.step === f}
-                          <p class="sum">{callSummary(c, nameOf)}</p>
-                        {/if}
                         {#if c.step === f}
+                          <p class="sum">{callSummary(c, nameOf)}</p>
                           <!-- Scrollable region: focusable on purpose so keyboard users can scroll the result. -->
                           <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
                           <pre class="t-json result" role="region" aria-label="Result of step {c.step}" tabindex="0">{pretty(c.content)}</pre>
@@ -376,351 +461,307 @@
                     {/if}
                   {/each}
                 </ol>
-              {:else}
-                <article class="card answer" data-tail>
-                  <p class="kicker"><Bot size={13} /> Answer <span class="tokpill">≈ {replay.totals.answerTokens} tokens</span></p>
-                  <p class="text pre">{turn.text}</p>
-                </article>
-              {/if}
-            </section>
+              </AccItem>
+            {:else}
+              <AccItem id="answer" tone="answer" open={openKey === 'answer'} ontoggle={toggleItem} current={autoKey === 'answer'}>
+                {#snippet head()}
+                  <Bot size={13} />
+                  <span class="h-t">Answer</span>
+                  <span class="h-m prose">turn {turn.n} reads {fmtTokens(turn.promptTokens)} tokens{#if ti > 0}<span class="delta"> +{fmtTokens(turn.promptTokens - prev)}</span>{/if}</span>
+                  <span class="h-r good">≈ {fmtInt(replay.totals.answerTokens)} tokens</span>
+                {/snippet}
+                <p class="b-text pre" data-tail>{turn.text}</p>
+              </AccItem>
+            {/if}
           {/if}
         {/each}
-
-        {#if f === 0}
-          <button type="button" class="start" onclick={togglePlay}>Play the run</button>
-        {/if}
       </div>
-      <p class="tr-foot">← → step · Space play or pause · Home / End · click any call to jump to it</p>
-    </div>
+    </section>
 
-    {#if unit}
-      <div class="t-panel podcard">
-        <div class="pod-head">
-          <div class="pod-title">
-            <p class="t-kicker">{pinnedId ? 'Pinned' : hoverId ? 'Preview' : 'This step'}</p>
-            <h2 class="pod-name">{unit.name}</h2>
-          </div>
-          {#if pinnedId}
-            <button type="button" class="t-btn sm" onclick={() => (pinnedId = null)}><X size={14} /> Unpin</button>
-          {/if}
-        </div>
-        <UnitCard {unit} {model} {marks} currentStep={f} />
+    <section class="t-panel cost" aria-label="What it cost">
+      <div class="cost-head">
+        <h2 class="t-h2">Sent to the model, turn by turn</h2>
+        <details class="honest">
+          <summary>How honest is this replay?</summary>
+          <p>
+            Pre-recorded, not a live model. Every tool result is the real output of the benchmark&rsquo;s catalogue over this estate, and tokens are billed the way the benchmark bills them
+            (characters &divide; 4, every turn re-sends everything, no prompt caching). The scripts are idealised: they add the numbers exactly, where live models got the two hard tasks
+            wrong.
+          </p>
+        </details>
       </div>
-    {/if}
-  </aside>
+      <div class="cost-chart">
+        <TurnBars fill turns={replay.turns} upTo={turnNow} onturn={jumpToTurn} />
+      </div>
+      <div class="cost-facts">
+        <StatTile compact label="Billed so far" value={'≈ ' + fmtTokens(billedNow)} sub="of ≈ {fmtTokens(facts.billed)} tokens" tone="#4338ca" />
+        <StatTile compact label="Billed ÷ text" value="{facts.multiple.toFixed(1)}×" sub="text is ≈ {fmtTokens(facts.once)} tokens" />
+        <StatTile compact label="Setup share" value={Math.round(facts.fixedShare * 100) + '%'} sub="instructions + tools" />
+      </div>
+    </section>
+  </div>
 </div>
 
-<section class="t-panel t-panel-pad cost" aria-label="What it cost">
-  <div class="cost-head">
-    <div>
-      <h2 class="t-h2">What the model re-reads on every turn</h2>
-      <p class="cost-lead">
-        Nothing is remembered between turns. Each turn sends the instructions, the tool definitions and the whole transcript so far.
-      </p>
-    </div>
-    <div class="variants">
-      {#if routes.length > 1}
-        <div class="variant">
-          <span class="ctl-label">How the model goes about it</span>
-          <Segmented label="Route" size="sm" value={route.id} onchange={setRoute} options={routes.map((r) => ({ id: r.id, label: r.label }))} />
-        </div>
-      {/if}
-      {#if fanout}
-        <div class="variant">
-          <span class="ctl-label">Calls per turn</span>
-          <Segmented label="Calls per turn" size="sm" value={batch} onchange={setBatch} options={BATCHES} />
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <div class="cost-body">
-    <TurnBars turns={replay.turns} upTo={turnNow} onturn={jumpToTurn} />
-    <div class="cost-facts">
-      <StatTile compact label="Text that exists" value={'\u2248 ' + fmtTokens(facts.once)} sub="tokens in the finished transcript" />
-      <StatTile compact label="Tokens billed" value={'\u2248 ' + fmtTokens(facts.billed)} sub="{facts.multiple.toFixed(1)}× the text, over {replay.totals.turns} turns" tone="#4338ca" />
-      <StatTile compact label="Setup share" value={Math.round(facts.fixedShare * 100) + '%'} sub="of the bill is instructions and tool definitions, re-sent" />
-      <StatTile compact label="The answer" value={'\u2248 ' + fmtInt(replay.totals.answerTokens)} sub="tokens" tone="#059669" />
-    </div>
-  </div>
-
-  <details class="honest">
-    <summary>How honest is this replay?</summary>
-    <p>
-      Pre-recorded, not a live model. The script stands in for the model's choices; every tool result is the real output of the benchmark's catalogue over this estate, and the tokens are
-      billed the way the benchmark's own loop bills them (characters ÷ 4, each turn re-sending everything, no prompt caching). The scripts are idealised: they add the numbers exactly,
-      where live models got the two hard tasks wrong. This shows the catalogue at its best, so the cost you see is the structural part.
-    </p>
-  </details>
-</section>
-
-<TourNav prev={{ href: '/tour/estate', label: 'The estate' }} next={{ href: '/tour/language', label: 'The catalogue grows a language' }} />
-
 <style>
-  .head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
-    gap: 20px;
-    align-items: start;
-  }
-  .head-text {
-    min-width: 0;
-  }
-  .picker {
+  .screen {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 5px;
-    padding: 12px 14px;
+    gap: var(--tour-gap);
+    min-width: 0;
   }
-  .ctl-label {
-    font-size: 12px;
+
+  /* ── header: title, question, navigation; the lesson runs full width below ── */
+  .top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 2px 14px;
+    min-width: 0;
+  }
+  .top .t-lead {
+    grid-column: 1 / -1;
+  }
+
+  /* ── replay row ─────────────────────────────────────────────────── */
+  .run {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 18px;
+    padding: 6px 12px;
+  }
+  .run-transport {
+    flex: 1 1 520px;
+    min-width: 0;
+  }
+  .variants {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    padding-left: 18px;
+    border-left: 1px solid var(--color-border-default);
+  }
+  .variant {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .v-label {
+    font-size: 11.5px;
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--color-text-muted);
+    white-space: nowrap;
   }
 
-  .bar {
+  /* ── stage: the estate beside the pod in focus ──────────────────── */
+  .stage {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 24px;
-    padding: 10px 16px;
+    grid-template-columns: minmax(0, 1fr) clamp(280px, 22vw, 340px);
+    gap: var(--tour-gap);
+    align-items: stretch;
   }
-  .tiles {
-    display: flex;
-    gap: 22px;
-    padding-left: 22px;
-    border-left: 1px solid var(--color-border-default);
-  }
-
-  .layout {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 430px;
-    gap: 16px;
-    align-items: start;
-  }
-  @media (max-width: 1100px) {
-    .head,
-    .layout,
-    .bar {
-      grid-template-columns: minmax(0, 1fr);
-    }
-    .tiles {
-      padding-left: 0;
-      border-left: 0;
-    }
-  }
-
-  /* ── map ────────────────────────────────────────────────────────── */
   .map-panel {
-    padding: 12px 16px 14px;
+    padding: 8px 12px 10px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
   }
-  .caption {
-    margin: 0;
-    min-height: 44px;
-    font-size: 14.5px;
-    color: var(--color-text-secondary);
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-  }
-  .cap-step {
-    flex: none;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--color-brand);
-  }
-
-  /* ── transcript ─────────────────────────────────────────────────── */
-  .side {
-    position: sticky;
-    top: 66px;
-    /* Fit the viewport below the header and replay bar at scroll position 0. */
-    height: calc(100dvh - 340px);
-    min-height: 480px;
-    max-height: 760px;
+  .podcard {
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    min-height: 0;
-  }
-  .transcript {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-  .tr-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 12px 14px 8px;
-    border-bottom: 1px solid var(--color-border-subtle);
-  }
-  .tr-foot {
-    margin: 0;
-    padding: 6px 14px;
-    border-top: 1px solid var(--color-border-subtle);
-    font-size: 12px;
-    color: var(--color-text-dim);
-  }
-  .scroller {
-    position: relative;
-    flex: 1;
+    gap: 6px;
     min-height: 0;
     overflow: auto;
-    padding: 10px 14px 16px;
+  }
+  .pod-head {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    min-width: 0;
+  }
+  .pod-name {
+    margin: 0;
+    min-width: 0;
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .unpin {
+    align-self: center;
+    flex: none;
+  }
+  .pod-empty {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    justify-content: center;
+    gap: 3px;
+    text-align: center;
+    color: var(--color-text-muted);
   }
-  .card {
-    border: 1px solid var(--color-border-default);
-    border-radius: 10px;
-    background: white;
-    padding: 8px 12px;
+  .pe-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--color-text-secondary);
   }
-  .card .kicker {
-    margin: 0 0 2px;
+  .pe-hint {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  /* ── conversation: transcript accordion and cost ────────────────── */
+  .convo {
+    flex: 1 1 0;
+    min-height: 250px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: var(--tour-gap);
+  }
+  .transcript {
+    min-height: 0;
     display: flex;
-    align-items: center;
-    gap: 6px;
+    flex-direction: column;
+    padding: 6px;
+  }
+  .acc-list {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: auto;
+  }
+
+  /* header snippets (rendered inside AccItem, styled here) */
+  .h-t {
+    flex: none;
     font-size: 11.5px;
     font-weight: 800;
     letter-spacing: 0.07em;
     text-transform: uppercase;
+    color: var(--color-text-primary);
+    white-space: nowrap;
+  }
+  .h-m {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
     color: var(--color-text-muted);
   }
-  .card .text {
-    margin: 0;
+  .h-m.prose {
+    font-family: inherit;
+    font-size: 13px;
+  }
+  .h-r {
+    flex: none;
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+  }
+  .h-r.good {
+    font-weight: 700;
+    color: var(--good);
+  }
+  .delta {
+    margin-left: 0.45em;
+    color: #b45309;
+  }
+
+  /* bodies */
+  .b-text {
+    margin: 2px 0 0;
     font-size: 13.5px;
     line-height: 1.5;
     color: var(--color-text-secondary);
   }
-  .card .text.pre {
+  .b-text.pre {
     white-space: pre-wrap;
     color: var(--color-text-primary);
   }
-  .setup {
-    background: var(--color-expanded-bg);
-  }
   .chips {
-    margin: 6px 0 0;
+    margin: 8px 0 0;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
   }
-  .you {
-    border-color: var(--color-brand);
-    background: var(--color-brand-bg);
-  }
-  .answer {
-    border-color: var(--good);
-    background: var(--good-bg);
-  }
-  .tokpill {
-    margin-left: auto;
-    font-family: var(--font-mono);
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--good);
+  .start {
+    margin-top: 8px;
   }
 
-  .turn {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .turn-head {
-    margin: 4px 0 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 10px;
-    font-size: 13px;
-    color: var(--color-text-muted);
-  }
-  .turn-n {
-    font-size: 11.5px;
-    font-weight: 800;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: var(--color-text-primary);
-  }
-  .turn-t strong {
-    font-family: var(--font-mono);
-    color: var(--color-text-primary);
-  }
-  .delta {
-    font-family: var(--font-mono);
-    color: #b45309;
-  }
   .calls {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
   }
   .call {
-    border-left: 2px solid var(--color-border-default);
-    margin-left: 8px;
-    padding-left: 8px;
-    border-radius: 0 8px 8px 0;
+    border-radius: 8px;
   }
   .call.current {
-    border-left-color: var(--color-brand);
     background: var(--color-brand-bg);
+    box-shadow: inset 2px 0 0 var(--color-brand);
   }
   .call-btn {
     display: grid;
-    grid-template-columns: 22px minmax(0, 1fr) auto;
+    grid-template-columns: 22px auto minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
     width: 100%;
     text-align: left;
-    padding: 4px 6px 4px 2px;
+    padding: 3px 8px 3px 4px;
     border-radius: 8px;
   }
   .call-btn:hover {
     background: rgba(99, 102, 241, 0.08);
   }
+  .dense .call-btn {
+    padding-top: 1px;
+    padding-bottom: 1px;
+  }
   .num {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: #e6e8fe;
     color: #4338ca;
     font-family: var(--font-mono);
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 800;
   }
   .current .num {
     background: var(--color-brand);
     color: white;
   }
-  .main {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
   .tool {
     font-family: var(--font-mono);
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 800;
+    white-space: nowrap;
   }
   .args {
+    min-width: 0;
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--color-text-muted);
@@ -734,127 +775,86 @@
     font-weight: 700;
     color: #4338ca;
   }
-  .dense .main {
-    flex-direction: row;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .dense .call-btn {
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
   .sum {
-    margin: 0 0 4px 32px;
+    margin: 0 8px 4px 34px;
     font-size: 13px;
     color: var(--color-text-secondary);
   }
   .result {
-    margin: 0 8px 8px 0;
-    max-height: 170px;
+    margin: 0 8px 8px 34px;
     font-size: 12px;
-  }
-  .start {
-    align-self: center;
-    margin-top: 6px;
-    padding: 9px 22px;
-    border-radius: 10px;
-    border: 1px solid var(--color-brand);
-    background: var(--color-brand);
-    color: white;
-    font-size: 15px;
-    font-weight: 700;
-  }
-  .start:hover {
-    background: var(--color-brand-dark);
+    line-height: 1.45;
   }
 
-  .podcard {
-    flex: none;
-    max-height: 48%;
-    overflow: auto;
-    padding: 12px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .pod-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 8px;
-  }
-  .pod-title {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    min-width: 0;
-  }
-  .pod-name {
-    margin: 0;
-    font-family: var(--font-mono);
-    font-size: 17px;
-    font-weight: 800;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ── cost ───────────────────────────────────────────────────────── */
+  /* cost */
   .cost {
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 8px;
+    padding: 10px 12px;
   }
   .cost-head {
     display: flex;
-    flex-wrap: wrap;
+    align-items: baseline;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px 24px;
+    gap: 10px;
   }
-  .cost-lead {
-    margin: 4px 0 0;
-    font-size: 14.5px;
-    color: var(--color-text-muted);
-    max-width: 70ch;
-  }
-  .variants {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px 18px;
-  }
-  .variant {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .cost-body {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 270px;
-    gap: 24px;
-    align-items: start;
+  .cost-chart {
+    flex: 1 1 0;
+    min-height: 0;
   }
   .cost-facts {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px 12px;
-  }
-  @media (max-width: 1100px) {
-    .cost-body {
-      grid-template-columns: minmax(0, 1fr);
-    }
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
   }
   .honest {
-    font-size: 13px;
+    position: relative;
+    font-size: 12.5px;
     color: var(--color-text-muted);
   }
   .honest summary {
     cursor: pointer;
     font-weight: 650;
     width: fit-content;
+    margin-left: auto;
   }
   .honest p {
-    margin: 6px 0 0;
-    max-width: 110ch;
+    position: absolute;
+    z-index: 10;
+    top: calc(100% + 6px);
+    right: 0;
+    width: min(440px, 80vw);
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 10px;
+    background: white;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+    font-size: 13px;
     line-height: 1.5;
+    color: var(--color-text-secondary);
+  }
+
+  @media (max-width: 1100px) {
+    .top {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .stage,
+    .convo {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .convo {
+      flex: none;
+      grid-template-rows: none;
+    }
+    .transcript {
+      max-height: 70dvh;
+    }
+    .cost-chart {
+      height: 180px;
+      flex: none;
+    }
   }
 </style>
