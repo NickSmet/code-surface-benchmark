@@ -37,6 +37,17 @@ Expand any tool call to inspect its inputs and outputs. Compare model turns, tok
 
 *Write review in the earlier UI. All operations use an in-memory mock estate.*
 
+### Guided tour
+
+For a walk-through with no model involved, open `/tour`. Four screens, each its own URL:
+
+1. `/tour/estate`: the 194 resources, wired together, through six lenses.
+2. `/tour/tools`: one question answered one tool call at a time, with the touched resources painted step by step.
+3. `/tour/language`: the same question on seven tool designs, ending in a query language you can grow feature by feature.
+4. `/tour/code`: a program run for real over the object, with its change set grouped by resource.
+
+Tool outputs come from the real handlers and the bill uses the benchmark's own accounting: an estimate of one token per four characters, split on every screen into what the model reads (text it already read on the turn before, called cached, plus new text) and what it writes. Every token is counted at full price, so the totals are tokens, not dollars; a provider with prompt caching would bill the cached part at roughly a tenth. The call sequences are scripted, so these screens show the shape of each approach, not a measurement.
+
 [Try it locally](#try-it) · [Read example programs](docs/solution-path-examples.md) · [Run benchmarks](#running-benchmarks) · [Comparison scope](#what-this-comparison-tells-you)
 
 ## Try it

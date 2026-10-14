@@ -94,6 +94,15 @@ body {
   color: var(--color-text-muted);
 }
 .bench-header .spacer { flex: 1; }
+.bench-header .tour-link {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-brand);
+  white-space: nowrap;
+}
+.bench-header .tour-link:hover { text-decoration: underline; }
 
 /* Compact task pills in the header; details show on hover. */
 .task-pills {
