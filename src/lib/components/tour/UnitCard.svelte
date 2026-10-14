@@ -15,8 +15,10 @@
     currentStep?: number;
     /** Show a second line with the resource's key facts (size, IP, SKU). */
     facts?: boolean;
+    /** Tighter rows, for a strip rather than a sidebar. */
+    dense?: boolean;
   }
-  let { unit, model, marks = null, currentStep, facts = false }: Props = $props();
+  let { unit, model, marks = null, currentStep, facts = false, dense = false }: Props = $props();
 
   const ICON = { vm: Server, nic: Network, pip: Globe, osDisk: HardDrive, dataDisk: HardDrive, storage: Box, sql: Database, app: AppWindow, other: Box };
   const INDENT: Partial<Record<MemberRole, number>> = { nic: 1, pip: 2, osDisk: 1, dataDisk: 1 };
@@ -47,7 +49,7 @@
   );
 </script>
 
-<ul class="rows">
+<ul class="rows" class:dense>
   {#each rows as { m, r, mark } (m.id)}
     {@const Icon = ICON[m.role]}
     <li
@@ -109,6 +111,21 @@
   .row[data-untouched='true'] {
     background: transparent;
     border-style: dashed;
+  }
+  .dense {
+    gap: 2px;
+  }
+  .dense .row {
+    gap: 8px;
+    padding: 2px 8px;
+    margin-left: calc(var(--indent, 0) * 14px);
+  }
+  .dense .ic {
+    width: 20px;
+    height: 20px;
+  }
+  .dense .name {
+    font-size: 13px;
   }
   .ic {
     display: grid;

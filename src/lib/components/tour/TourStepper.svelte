@@ -2,6 +2,7 @@
   import { page } from '$app/state';
   import { ArrowUpRight } from '@lucide/svelte';
 
+  // `hint` is the tooltip: the bar stays one line tall so the screens below it can fit a laptop.
   const steps = [
     { href: '/tour/estate', title: 'The estate', hint: '194 things, many ways to look' },
     { href: '/tour/tools', title: 'Naive tools', hint: 'One call at a time' },
@@ -13,21 +14,18 @@
 </script>
 
 <header class="tour-top">
-  <a class="brand" href="/tour/estate">
+  <a class="brand" href="/tour/estate" title="Interactive tour: pre-recorded, no live model">
     <span class="brand-title">From tools to code surfaces</span>
-    <span class="brand-sub">interactive tour · pre-recorded, no live model</span>
+    <span class="brand-sub">pre-recorded, no live model</span>
   </a>
 
   <nav aria-label="Tour steps">
     <ol class="steps">
       {#each steps as s, i (s.href)}
         <li class="step" class:done={i < currentIndex} class:current={i === currentIndex}>
-          <a href={s.href} aria-current={i === currentIndex ? 'step' : undefined}>
+          <a href={s.href} title={s.hint} aria-current={i === currentIndex ? 'step' : undefined}>
             <span class="num">{i + 1}</span>
-            <span class="txt">
-              <span class="title">{s.title}</span>
-              <span class="hint">{s.hint}</span>
-            </span>
+            <span class="title">{s.title}</span>
           </a>
         </li>
       {/each}
@@ -36,7 +34,7 @@
 
   <a class="live" href="/">
     Live benchmark
-    <ArrowUpRight size={15} />
+    <ArrowUpRight size={14} />
   </a>
 </header>
 
@@ -47,21 +45,23 @@
     z-index: 30;
     display: flex;
     align-items: center;
-    gap: 24px;
-    padding: 10px 28px;
+    gap: 18px;
+    height: var(--tour-top, 44px);
+    padding: 0 20px;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(6px);
     border-bottom: 1px solid var(--color-border-default);
   }
   .brand {
     display: flex;
-    flex-direction: column;
+    align-items: baseline;
+    gap: 10px;
     text-decoration: none;
     color: inherit;
     flex: none;
   }
   .brand-title {
-    font-size: 15px;
+    font-size: 14.5px;
     font-weight: 800;
     letter-spacing: -0.01em;
   }
@@ -78,7 +78,7 @@
   .steps {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -89,9 +89,9 @@
   }
   .step + .step::before {
     content: '';
-    width: 22px;
+    width: 16px;
     height: 2px;
-    margin-right: 6px;
+    margin-right: 4px;
     background: var(--color-border-default);
     border-radius: 1px;
   }
@@ -102,8 +102,8 @@
   .step a {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 5px 12px 5px 6px;
+    gap: 8px;
+    padding: 3px 12px 3px 4px;
     border-radius: 999px;
     border: 1px solid transparent;
     text-decoration: none;
@@ -121,11 +121,11 @@
   .num {
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     border-radius: 50%;
     border: 2px solid var(--color-border-strong);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 800;
     color: var(--color-text-muted);
     background: white;
@@ -139,46 +139,40 @@
     background: var(--color-brand);
     color: white;
   }
-  .txt {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.2;
-  }
   .title {
-    font-size: 14px;
+    font-size: 13.5px;
     font-weight: 700;
+    line-height: 1.2;
     color: var(--color-text-primary);
-  }
-  .hint {
-    font-size: 12px;
-    color: var(--color-text-muted);
+    white-space: nowrap;
   }
   .live {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     flex: none;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 650;
     color: var(--color-brand);
     text-decoration: none;
-    padding: 6px 10px;
+    padding: 5px 9px;
     border-radius: 8px;
   }
   .live:hover {
     background: var(--color-brand-bg);
   }
 
-  @media (max-width: 1250px) {
-    .hint {
+  @media (max-width: 1350px) {
+    .brand-sub {
       display: none;
     }
   }
   @media (max-width: 960px) {
     .tour-top {
+      height: auto;
       flex-wrap: wrap;
-      gap: 8px 16px;
-      padding: 8px 16px;
+      gap: 4px 16px;
+      padding: 6px 16px;
     }
     nav {
       order: 3;
