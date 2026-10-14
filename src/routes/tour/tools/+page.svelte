@@ -324,7 +324,7 @@
       accent="var(--color-brand)"
       options={TASK_IDS.map((id) => ({ id, label: SHORT[id], title: TASKS.find((t) => t.id === id)?.description }))}
     />
-    <TourNav prev={{ href: '/tour/estate', label: 'The estate' }} next={{ href: '/tour/language', label: 'A language' }} />
+    <TourNav prev={{ href: '/tour/estate', label: 'The estate' }} next={{ href: '/tour/strains', label: 'Where it strains' }} />
     <p class="t-lead">{route.lesson}</p>
   </header>
 

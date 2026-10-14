@@ -249,7 +249,7 @@
 
 <header class="head">
   <div class="head-text">
-    <p class="t-kicker">③ A catalogue that grows a language</p>
+    <p class="t-kicker">④ A catalogue that grows a language</p>
     <h1 class="t-h1">Every fix adds vocabulary.</h1>
     <p class="t-lead">
       Push a tool catalogue to answer more in fewer calls and it grows, one parameter at a time, into a query language. Here is one question put to eight tool designs. All eight reach the same answer.
@@ -575,7 +575,7 @@
   </p>
 </section>
 
-<TourNav prev={{ href: '/tour/tools', label: 'Naive tools' }} next={{ href: '/tour/object', label: 'Reshape the estate into an object' }} />
+<TourNav prev={{ href: '/tour/strains', label: 'Where it strains' }} next={{ href: '/tour/object', label: 'Reshape the estate into an object' }} />
 
 <style>
   .head {

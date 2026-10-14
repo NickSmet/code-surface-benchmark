@@ -39,13 +39,16 @@ import {
   definitionTokens,
   evaluateExpression,
   keywords,
+  planTask,
   rungFacts,
   queryContent,
   queryTool,
   runQuery,
   type FeatureId,
-  type QueryOut
+  type QueryOut,
+  type RungId
 } from '../src/lib/tour/language';
+import { buildStrains, strainLink } from '../src/lib/tour/strains';
 import {
   ACTS,
   AT,
@@ -1041,6 +1044,90 @@ test('calculator rung: every sum the model asks for is the sum of the costs the 
   assert.ok(calc.bill.output > filter.bill.output, 'the figures are written out');
   assert.equal(calc.replay.finalText, filter.replay.finalText);
   assert.deepEqual(calc.tools.map((t) => t.function.name), ['list_resources', 'get_resource', 'calculate']);
+});
+
+// ── where the naive tools strain ───────────────────────────────────────────
+
+test('strains: five scenarios, each the tools screen\'s own replay, and what each says is its shape', () => {
+  const inv = buildInventory();
+  const rows = buildStrains(inv, buildToolRungs(inv));
+  assert.deepEqual(rows.map((r) => r.id), ['chain', 'arithmetic', 'fan-out', 'recital', 'fits']);
+  for (const r of rows) {
+    assert.ok(CATALOG_ROUTES[r.task].some((x) => x.id === r.route && x.label === r.title), `${r.id}: a route the tools screen has, under its name`);
+    assert.deepEqual(r.bill, runBill(replayCatalog({ task: r.task, route: r.route })), `${r.id}: the bill is the tools screen's`);
+    assert.equal(r.calls, r.replay.totals.calls);
+    assert.equal(r.rounds, r.replay.turns.filter((t) => t.calls.length > 0).length);
+    assert.equal(r.widest, Math.max(...r.replay.turns.map((t) => t.calls.length)));
+  }
+  const by = Object.fromEntries(rows.map((r) => [r.id, r]));
+  // A chain is calls one to a turn; a fan-out is many calls in one turn; one list and one lookup is neither.
+  assert.deepEqual([by.chain.calls, by.chain.rounds, by.chain.widest], [3, 3, 1]);
+  assert.deepEqual([by.arithmetic.calls, by.arithmetic.rounds, by.arithmetic.widest], [1, 1, 1]);
+  assert.ok(by['fan-out'].widest > 1 && by['fan-out'].rounds === 2);
+  assert.ok(by.recital.widest > 1 && by.recital.rounds === 2);
+  assert.deepEqual([by.fits.calls, by.fits.rounds], [1, 1]);
+  // The same question on two routes is the same question: one row is the best case, the other the cautious one.
+  assert.equal(by.arithmetic.task, by['fan-out'].task);
+  assert.ok(by['fan-out'].calls > by.arithmetic.calls);
+  assert.equal(by.fits.fix, null, 'a narrow tool has nothing to fix');
+  for (const id of ['chain', 'arithmetic', 'fan-out', 'recital'] as const) assert.ok(by[id].fix && by[id].fix.adds && by[id].fix.cta, `${id} has a fix`);
+});
+
+test('strains: every number in the copy is read off the replay, the estate or the plan it is about', () => {
+  const inv = buildInventory();
+  const rungs = buildToolRungs(inv);
+  const by = Object.fromEntries(buildStrains(inv, rungs).map((r) => [r.id, r]));
+  const prod = inv.subscriptions.find((s) => s.name === 'Production')!.id;
+  const vms = inv.resources.filter((r): r is VirtualMachine => r.type === 'virtualMachine' && r.subscriptionId === prod);
+  const running = vms.filter((v) => v.powerState === 'running');
+  const rung = (id: RungId) => rungs.find((r) => r.id === id)!;
+
+  assert.ok(by.chain.strain.text.startsWith(`${by.chain.calls} calls, one to a turn:`), by.chain.strain.text);
+  assert.ok(by.arithmetic.strain.text.includes(`lists ${vms.length} VMs, ${running.length} of them running`), by.arithmetic.strain.text);
+  assert.ok(
+    by['fan-out'].strain.text.startsWith(`${by['fan-out'].calls} calls: a list, then a lookup for each of the ${running.length} running VMs.`),
+    by['fan-out'].strain.text
+  );
+  assert.ok(by['fan-out'].strain.text.includes(`did the same job in ${by.arithmetic.calls} call,`), 'the contrast quotes the other route');
+  const writes = by.recital.replay.calls.filter((c) => c.name !== 'list_resources');
+  const listed = by.recital.replay.calls[0].resultSentTokens;
+  const spelled = writes.reduce((n, c) => n + c.callTokens, 0);
+  assert.ok(by.recital.strain.text.startsWith(`${by.recital.calls} calls: a ${fmtTokens(listed)}-token list, then ${writes.length} single-resource writes.`), by.recital.strain.text);
+  assert.ok(by.recital.strain.text.includes(`\u2248 ${fmtTokens(spelled)} tokens of calls`), by.recital.strain.text);
+  assert.equal(by.recital.calls, 1 + writes.length);
+  assert.equal(by.fits.strain.text, `1 call, ${fmtTokens(by.fits.replay.calls[0].resultSentTokens)} tokens back. The tool does exactly what the question asks.`);
+
+  // The fixes quote the plans and the rungs they point at.
+  const joined = planTask('granular-read', new Set<FeatureId>(['join']), buildInventory());
+  assert.ok(joined.ok && joined.calls === 1);
+  assert.ok(by.chain.fix!.text.includes(`${joined.calls} call, not ${by.chain.calls}`), by.chain.fix!.text);
+  assert.ok(
+    by.arithmetic.fix!.text.endsWith(`\u2248 ${fmtTokens(rung('calculator').bill.total)} tokens read and written, against \u2248 ${fmtTokens(rung('filter').bill.total)}.`),
+    by.arithmetic.fix!.text
+  );
+  assert.ok(by['fan-out'].fix!.text.includes(`from ${rung('per-property').replay.totals.calls} calls to ${rung('filter').replay.totals.calls}.`), by['fan-out'].fix!.text);
+  const edited = planTask('bulk-write', new Set<FeatureId>(['update']), buildInventory());
+  assert.ok(edited.ok);
+  assert.ok(by.recital.fix!.text.endsWith(`takes ${edited.calls} calls, not ${by.recital.calls}.`), by.recital.fix!.text);
+});
+
+test('strains: every fix links to a rung or a feature the language screen really has', () => {
+  const inv = buildInventory();
+  const rungIds = new Set<string>(buildToolRungs(inv).map((r) => r.id));
+  for (const r of buildStrains(inv, buildToolRungs(inv))) {
+    if (!r.fix) continue;
+    const url = new URL(r.fix.href, 'http://tour.test');
+    assert.equal(url.pathname, '/tour/language', `${r.id}: the language screen`);
+    const rung = url.searchParams.get('rung');
+    if (rung) assert.ok(rungIds.has(rung) || rung === 'code', `${r.id}: rung ${rung} exists`);
+    const features = (url.searchParams.get('f') ?? '').split(',').filter(Boolean);
+    for (const f of features) assert.ok(FEATURE_IDS.includes(f as FeatureId), `${r.id}: feature ${f} exists`);
+    // A feature is switched on in the section that grows the language, so the link lands there.
+    if (features.length) assert.equal(url.hash, '#grow', `${r.id}: the feature is shown where it is switched on`);
+  }
+  assert.equal(strainLink(null), '/tour/language');
+  assert.equal(strainLink('calculator'), '/tour/language?rung=calculator');
+  assert.equal(strainLink('query', ['join', 'update'], true), '/tour/language?rung=query&f=join,update#grow');
 });
 
 test('query language: filter, group, aggregate, project, order and page behave like the data says', () => {
