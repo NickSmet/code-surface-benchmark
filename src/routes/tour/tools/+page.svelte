@@ -471,11 +471,11 @@
         </details>
       </div>
       <div class="cost-chart">
-        <TurnBars fill turns={replay.turns} upTo={turnNow} onturn={jumpToTurn} />
+        <TurnBars fill turns={replay.turns} upTo={turnNow} onturn={jumpToTurn} limit={MAX_ITERATIONS} />
       </div>
       {#if overCap}
         <p class="cap-note">
-          The benchmark stops a run after {MAX_ITERATIONS} turns, so a model working this slowly would not finish. The replay lets it, to show the bill.
+          The dashed line is where the benchmark stops a run ({MAX_ITERATIONS} turns), so a model working this slowly would not finish. The replay lets it, to show the bill.
         </p>
       {/if}
       <div class="cost-facts">

@@ -15,8 +15,10 @@
     fill?: boolean;
     /** Click a bar to jump to that turn. */
     onturn?: (turn: number) => void;
+    /** Turns a run gets before the benchmark stops it. A dashed line marks it when the replay runs past it. */
+    limit?: number;
   }
-  let { turns, upTo, height = 150, fill = false, onturn }: Props = $props();
+  let { turns, upTo, height = 150, fill = false, onturn, limit }: Props = $props();
 
   // A bar is one turn: what the model read (the big block) and, on top, what it wrote (amber).
   // Text that is new in a request is drawn in colour. Text the model already got in the request
@@ -66,6 +68,13 @@
     return `${head}\nCached ${n(s.cachedTokens)}: the same as the previous request (${list(s.cached)}), usually billed at about a tenth.\nNew ${n(s.freshTokens)} (${list(s.fresh)}).`;
   }
   const showTick = (k: number): boolean => !dense || k === 1 || k === turns.length || k % 5 === 0;
+  /** Where the limit falls, as a share of the bars: the middle of the gap after bar `limit`. */
+  const limitAt = $derived.by((): string | null => {
+    if (!limit || limit <= 0 || limit >= turns.length) return null;
+    const share = limit / turns.length;
+    const gap = dense ? 2 : 6;
+    return `calc(${share * 100}% + ${(share - 0.5) * gap}px)`;
+  });
   const summary = $derived(
     `Tokens read and written on each of ${turns.length} turns. ${turns
       .map((t) => `Turn ${t.n} reads ${n(t.promptTokens)} and writes ${n(t.completionTokens)}`)
@@ -112,6 +121,7 @@
           {/if}
         </button>
       {/each}
+      {#if limitAt}<span class="limit" style:left={limitAt} aria-hidden="true"></span>{/if}
     </div>
   </div>
   <div class="xaxis" class:dense aria-hidden="true">
@@ -167,10 +177,21 @@
     color: var(--color-text-dim);
   }
   .bars {
+    position: relative;
     height: 100%;
     display: flex;
     align-items: flex-end;
     gap: 6px;
+  }
+  /* Where the benchmark would stop the run. The same amber as the note under the chart. */
+  .limit {
+    position: absolute;
+    top: -6px;
+    bottom: 0;
+    width: 0;
+    border-left: 1.5px dashed #d97706;
+    pointer-events: none;
+    z-index: 1;
   }
   .bars.dense {
     gap: 2px;
