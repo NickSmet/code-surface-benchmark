@@ -46,12 +46,18 @@ export interface ReplayCall {
   name: string;
   args: Record<string, unknown>;
   argsText: string;
-  /** Tokens the model generated to make this call. */
+  /** Tokens the model generated to make this call: the tool's name and its arguments. This is what it is billed for as output. */
   callTokens: number;
   content: string;
   preview: string;
-  /** Tokens the result added to the transcript. */
+  /** Tokens in the result's text alone. */
   resultTokens: number;
+  /**
+   * Tokens the result takes up in every later request: the whole tool message, with its
+   * wrapper and escaping. This, not the bare text, is what the model is billed for reading
+   * it again, so it is the number to show next to the chart.
+   */
+  resultSentTokens: number;
   error?: boolean;
   diff?: ChangeRow[];
   touches: TouchEvent[];
@@ -180,7 +186,8 @@ export function runReplay(
       const step = calls.length + 1;
       const res = surface.dispatch(name, args);
       if (res.diff && res.diff.length > 0 && !res.error) surface.applyDiff?.(res.diff);
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: res.content });
+      const toolMessage: Message = { role: 'tool', tool_call_id: tc.id, content: res.content };
+      messages.push(toolMessage);
       const events: TouchEvent[] = res.touches.map((t) => ({ ...t, step }));
       const call: ReplayCall = {
         step,
@@ -193,6 +200,7 @@ export function runReplay(
         content: res.content,
         preview: res.preview,
         resultTokens: estimateTokens(res.content),
+        resultSentTokens: estimateTokens(JSON.stringify(toolMessage)),
         error: res.error,
         diff: res.diff,
         touches: events

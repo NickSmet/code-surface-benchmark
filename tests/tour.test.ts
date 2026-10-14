@@ -5,12 +5,13 @@ import { buildProjection, diffProjection } from '../src/lib/inventory/projection
 import { computeGroundTruth } from '../src/lib/inventory/truth';
 import { sameChanges } from '../src/lib/bench-checks';
 import { runBench } from '../src/lib/agent/loop';
+import { MAX_ITERATIONS } from '../src/lib/agent/limits';
 import { createCatalogSurface } from '../src/lib/surfaces/catalog';
 import type { ChatTurnArgs, ProviderClient, ProviderToolCall } from '../src/lib/agent/providers/types';
 import { buildEstateModel } from '../src/lib/tour/estate';
 import { createCatalogSim } from '../src/lib/tour/catalog-sim';
-import { callId } from '../src/lib/tour/replay';
-import { replayCatalog } from '../src/lib/tour/scenarios';
+import { callId, type Replay } from '../src/lib/tour/replay';
+import { CATALOG_ROUTES, replayCatalog } from '../src/lib/tour/scenarios';
 import { needleFor } from '../src/lib/tour/needles';
 import { countMarks, dominantKind, marksAt } from '../src/lib/tour/touch';
 import { estimateTokens, fmtTokens } from '../src/lib/tour/tokens';
@@ -19,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { runTracked } from '../src/lib/tour/code-run';
 import { CONTRACT_PROBES, TASK_ORDER, parseSolutionPrograms } from '../src/lib/tour/programs';
 import { codeTouches, replayCode } from '../src/lib/tour/code-compare';
-import { PART_KEYS, billedAt, callSummary, costFacts, lastFrame, promptSplit, stepBadge, turnAt } from '../src/lib/tour/replay-view';
+import { PART_KEYS, billedAt, billedSplit, callSummary, costFacts, lastFrame, promptSplit, stepBadge, turnAt, turnFlow } from '../src/lib/tour/replay-view';
 import { clipLines, isJson, prettyJson, tokenizeJson } from '../src/lib/tour/json-highlight';
 import { compareSurfaces, comparisonHeadline, comparisonLesson, groupDiff, outcomeCaption, probeResult, seenBy, splitBill } from '../src/lib/tour/code-view';
 import {
@@ -449,14 +450,181 @@ test('replay view: captions and badges describe what each call touched', () => {
   assert.equal(stepBadge(pod, marksAt([], 5)), null);
 });
 
+/** Every run the tools screen can show: each question, each route, and each way of batching calls. */
+function allCatalogRuns(): Array<{ label: string; task: TaskId; replay: Replay }> {
+  const runs: Array<{ label: string; task: TaskId; replay: Replay }> = [];
+  for (const task of TASK_ORDER) {
+    for (const route of CATALOG_ROUTES[task]) {
+      const base = replayCatalog({ task, route: route.id });
+      runs.push({ label: `${task}/${route.id}`, task, replay: base });
+      // Batching only changes runs that make parallel calls.
+      if (base.turns.some((t) => t.calls.length > 1)) {
+        for (const batchSize of [10, 1]) {
+          runs.push({ label: `${task}/${route.id}, ${batchSize} per turn`, task, replay: replayCatalog({ task, route: route.id, batchSize }) });
+        }
+      }
+    }
+  }
+  return runs;
+}
+
+test('billing audit: the tools screen covers nine runs, and every one is billed exactly like the real agent loop, turn by turn', async () => {
+  const runs = allCatalogRuns();
+  assert.equal(runs.length, 9, runs.map((r) => r.label).join(' | '));
+  for (const run of runs) {
+    const replay = run.replay;
+    const surface = createCatalogSurface(undefined, buildInventory());
+    const scripted: ProviderToolCall[][] = replay.turns.map((t) =>
+      t.calls.map((c) => ({ id: callId(c.step), type: 'function' as const, function: { name: c.name, arguments: c.argsText } }))
+    );
+    const prompt: number[] = [];
+    const completion: number[] = [];
+    let turn = 0;
+    const provider: ProviderClient = {
+      label: 'scripted',
+      model: 'scripted',
+      isStub: true,
+      async chatTurn(args: ChatTurnArgs) {
+        const chars =
+          args.systemPrompt.length + args.messages.reduce((n, m) => n + JSON.stringify(m).length, 0) + (args.tools ? JSON.stringify(args.tools).length : 0);
+        const calls = scripted[turn] ?? [];
+        const content = calls.length ? '' : replay.finalText;
+        const out = calls.length ? calls.reduce((n, c) => n + estimateTokens(c.function.name + c.function.arguments), 0) : estimateTokens(content);
+        turn += 1;
+        const p = Math.ceil(chars / 4);
+        prompt.push(p);
+        completion.push(out);
+        return { content, toolCalls: calls, usage: { promptTokens: p, cachedPromptTokens: 0, completionTokens: out, totalTokens: p + out } };
+      }
+    };
+    let metrics: { promptTokens: number; completionTokens: number; turns: number; toolCalls: number } | null = null;
+    let stopped: string | null = null;
+    for await (const e of runBench({ provider, surface, task: replay.task, env: {} })) {
+      if (e.type === 'complete') metrics = e.metrics;
+      if (e.type === 'error') {
+        metrics = e.metrics;
+        stopped = e.message;
+      }
+    }
+    assert.ok(metrics, run.label);
+    // The benchmark's loop gives a model MAX_ITERATIONS turns. A replay that needs more is a what-if:
+    // the loop agrees with it turn by turn up to the cap and then stops the run.
+    const played = replay.turns.slice(0, MAX_ITERATIONS);
+    if (replay.turns.length > MAX_ITERATIONS) assert.match(stopped ?? '', new RegExp(`did not finish within ${MAX_ITERATIONS} turns`), run.label);
+    else assert.equal(stopped, null, `${run.label}: the loop finishes the run`);
+    // The replay says the same thing the real loop measured, turn by turn, not just in total.
+    assert.deepEqual(prompt, played.map((t) => t.promptTokens), `${run.label}: input per turn`);
+    assert.deepEqual(completion, played.map((t) => t.completionTokens), `${run.label}: output per turn`);
+    assert.equal(metrics!.turns, played.length, `${run.label}: turns`);
+    assert.equal(metrics!.toolCalls, played.reduce((n, t) => n + t.calls.length, 0), `${run.label}: calls`);
+    assert.equal(metrics!.promptTokens, played.reduce((n, t) => n + t.promptTokens, 0), `${run.label}: input total`);
+    assert.equal(metrics!.completionTokens, played.reduce((n, t) => n + t.completionTokens, 0), `${run.label}: output total`);
+  }
+});
+
+test('billing audit: exactly two what-if runs are longer than the benchmark lets a model go', () => {
+  const tooLong = allCatalogRuns()
+    .filter((r) => r.replay.turns.length > MAX_ITERATIONS)
+    .map((r) => `${r.label}: ${r.replay.turns.length} turns`);
+  // The screen says so next to these two, and only these two.
+  assert.deepEqual(tooLong, ['filter-aggregate/survey, 1 per turn: 20 turns', 'bulk-write/standard, 1 per turn: 39 turns']);
+});
+
+test('billing audit: each request is the one before plus the last turn’s calls and results, and nothing else', () => {
+  for (const { label, replay } of allCatalogRuns()) {
+    replay.turns.forEach((turn, i) => {
+      for (const c of turn.calls) {
+        const wrapped = JSON.stringify({ role: 'tool', tool_call_id: c.id, content: c.content });
+        assert.equal(c.resultSentTokens, estimateTokens(wrapped), `${label}, call ${c.step}: a result costs what its whole message costs`);
+        assert.ok(c.resultSentTokens >= c.resultTokens, `${label}, call ${c.step}: the wrapper only adds`);
+        assert.equal(c.callTokens, estimateTokens(c.name + c.argsText), `${label}, call ${c.step}: output is the name and the arguments`);
+      }
+      if (i === 0) return;
+      // Rebuild what the previous turn put into the conversation from the recorded calls alone.
+      const prev = replay.turns[i - 1];
+      const assistant = {
+        role: 'assistant',
+        content: '',
+        tool_calls: prev.calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.argsText } }))
+      };
+      const added =
+        JSON.stringify(assistant).length +
+        prev.calls.reduce((n, c) => n + JSON.stringify({ role: 'tool', tool_call_id: c.id, content: c.content }).length, 0);
+      const grew = turn.promptTokens - prev.promptTokens;
+      // Both requests are rounded up once, so the growth can differ from added/4 by less than a token.
+      assert.ok(Math.abs(grew - added / 4) < 1, `${label}, turn ${turn.n}: grew by ${grew}, the previous turn added ${added / 4}`);
+      // What the model wrote last turn comes back as input, wrapped, so it can only be bigger.
+      assert.ok(promptSplit(replay.turns, i).fresh.calls >= prev.completionTokens, `${label}, turn ${turn.n}: the calls come back at least as large as they were written`);
+    });
+  }
+});
+
+test('billing audit: a turn writes only its calls, the last turn writes only the answer, and the totals are their sum', () => {
+  for (const { label, replay } of allCatalogRuns()) {
+    const { turns, totals } = replay;
+    const last = turns[turns.length - 1];
+    turns.slice(0, -1).forEach((t) => {
+      assert.ok(t.calls.length > 0, `${label}, turn ${t.n}: every turn before the last makes a call`);
+      assert.equal(t.text, '', `${label}, turn ${t.n}: a turn that calls tools writes no answer`);
+      assert.equal(t.completionTokens, t.calls.reduce((n, c) => n + c.callTokens, 0), `${label}, turn ${t.n}: it writes exactly its calls`);
+    });
+    assert.equal(last.calls.length, 0, `${label}: the last turn makes no call`);
+    assert.equal(last.text, replay.finalText);
+    assert.equal(last.completionTokens, estimateTokens(replay.finalText), `${label}: the last turn writes the answer`);
+    assert.equal(last.completionTokens, totals.answerTokens);
+    assert.ok(last.completionTokens * 10 < last.promptTokens, `${label}: the answer is tiny next to everything it re-reads`);
+    assert.equal(totals.turns, turns.length);
+    assert.equal(totals.calls, replay.calls.length);
+    assert.equal(totals.promptTokens, turns.reduce((n, t) => n + t.promptTokens, 0));
+    assert.equal(totals.completionTokens, turns.reduce((n, t) => n + t.completionTokens, 0));
+    assert.equal(totals.billedTokens, totals.promptTokens + totals.completionTokens);
+    assert.deepEqual(
+      turns.flatMap((t) => t.calls.map((c) => c.step)),
+      replay.calls.map((c) => c.step),
+      `${label}: calls are numbered in the order the turns made them`
+    );
+  }
+});
+
+test('billing audit: the bill so far splits into what was read and what was written, and ends at the run total', () => {
+  for (const { label, replay } of allCatalogRuns()) {
+    assert.deepEqual(billedSplit(replay, 0), { input: 0, output: 0 }, `${label}: nothing is billed before the first request`);
+    let prev = 0;
+    for (let f = 0; f <= lastFrame(replay); f++) {
+      const b = billedSplit(replay, f);
+      const turn = turnAt(replay, f);
+      assert.equal(b.input + b.output, billedAt(replay, f), `${label}, frame ${f}`);
+      assert.equal(b.input, replay.turns.filter((t) => t.n <= turn).reduce((n, t) => n + t.promptTokens, 0), `${label}, frame ${f}: input`);
+      assert.ok(b.input + b.output >= prev, `${label}, frame ${f}: never goes down`);
+      prev = b.input + b.output;
+    }
+    assert.deepEqual(
+      billedSplit(replay, lastFrame(replay)),
+      { input: replay.totals.promptTokens, output: replay.totals.completionTokens },
+      `${label}: the last frame carries the whole bill`
+    );
+    // The first call's frame already includes the first turn's request and the call it wrote.
+    const first = replay.turns[0];
+    assert.deepEqual(billedSplit(replay, 1), { input: first.promptTokens, output: first.completionTokens }, `${label}: frame 1 is turn 1 read and written`);
+  }
+});
+
+test('billing audit: a turn in plain terms is what it read (cached + new) and what it wrote', () => {
+  for (const { label, replay } of allCatalogRuns()) {
+    replay.turns.forEach((t, i) => {
+      const flow = turnFlow(replay.turns, i);
+      assert.equal(flow.cached + flow.fresh, flow.input, `${label}, turn ${t.n}: cached + new is everything it read`);
+      assert.equal(flow.input, t.promptTokens);
+      assert.equal(flow.output, t.completionTokens);
+      assert.equal(flow.calls, t.calls.length);
+      assert.equal(flow.cached, i === 0 ? 0 : replay.turns[i - 1].promptTokens, `${label}, turn ${t.n}: what is cached is the whole request before`);
+    });
+  }
+});
+
 test('replay view: each request splits into what it repeats and what is new', () => {
-  const runs = [
-    replayCatalog({ task: 'granular-read' }),
-    replayCatalog({ task: 'filter-aggregate', route: 'survey' }),
-    replayCatalog({ task: 'filter-aggregate', route: 'survey', batchSize: 1 }),
-    replayCatalog({ task: 'bulk-write' }),
-    replayCatalog({ task: 'single-lookup' })
-  ];
+  const all = allCatalogRuns();
+  const runs = all.map((r) => r.replay);
   const sum = (p: Record<(typeof PART_KEYS)[number], number>): number => PART_KEYS.reduce((n, k) => n + p[k], 0);
   for (const r of runs) {
     const fixed = r.turns[0].parts.system + r.turns[0].parts.tools;
@@ -482,7 +650,7 @@ test('replay view: each request splits into what it repeats and what is new', ()
     });
   }
   // With one call per turn, a request is the previous one plus exactly one call and its result.
-  const slow = runs[2];
+  const slow = all.find((r) => r.label === 'filter-aggregate/survey, 1 per turn')!.replay;
   assert.equal(slow.turns.length, 20);
   const last = promptSplit(slow.turns, 19);
   assert.ok(last.cachedTokens > 8 * last.freshTokens, 'late in a long run almost everything is repeated');

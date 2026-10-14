@@ -30,10 +30,21 @@ export function turnAt(replay: Replay, frame: number): number {
  * that turn's bill.
  */
 export function billedAt(replay: Replay, frame: number): number {
+  const { input, output } = billedSplit(replay, frame);
+  return input + output;
+}
+
+/** The same bill as `billedAt`, split into what the model read (input) and what it wrote (output). */
+export function billedSplit(replay: Replay, frame: number): { input: number; output: number } {
   const turn = turnAt(replay, frame);
-  let n = 0;
-  for (const t of replay.turns) if (t.n <= turn) n += t.promptTokens + t.completionTokens;
-  return n;
+  let input = 0;
+  let output = 0;
+  for (const t of replay.turns) {
+    if (t.n > turn) break;
+    input += t.promptTokens;
+    output += t.completionTokens;
+  }
+  return { input, output };
 }
 
 export interface CostFacts {
@@ -104,6 +115,26 @@ export function promptSplit(turns: ReplayTurn[], index: number): PromptSplit {
   const cachedTokens = prev ? prev.promptTokens : 0;
   const freshTokens = turn.promptTokens - cachedTokens;
   return { cached: settle(cachedParts, cachedTokens), fresh: settle(freshParts, freshTokens), cachedTokens, freshTokens };
+}
+
+/** One model turn in plain terms: what it read, what it wrote. */
+export interface TurnFlow {
+  /** Tokens the model reads: the whole request. */
+  input: number;
+  /** Of those, tokens identical to the request before (nothing on the first turn). */
+  cached: number;
+  /** Of those, tokens that are new this turn. */
+  fresh: number;
+  /** Tokens the model writes: the calls' names and arguments, or the answer on the last turn. */
+  output: number;
+  /** How many calls it wrote; none on the last turn, which writes the answer. */
+  calls: number;
+}
+
+export function turnFlow(turns: ReplayTurn[], index: number): TurnFlow {
+  const turn = turns[index];
+  const s = promptSplit(turns, index);
+  return { input: turn.promptTokens, cached: s.cachedTokens, fresh: s.freshTokens, output: turn.completionTokens, calls: turn.calls.length };
 }
 
 /** Parts are each rounded up on their own, so they can overshoot the whole: the biggest absorbs the difference. */
