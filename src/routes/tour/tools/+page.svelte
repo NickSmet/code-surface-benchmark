@@ -116,6 +116,8 @@
   // One item is open at a time. By default it is wherever the playhead is; opening
   // another is remembered only until the playhead moves.
   const autoKey = $derived(f === 0 ? 'you' : f >= last ? 'answer' : `turn-${turnNow}`);
+  // Setup, You, and every turn that has started: with many of them the open item gets a minimum height.
+  const accCount = $derived(2 + replay.turns.filter((t) => (t.calls.length > 0 ? t.calls[0].step <= f : f === last)).length);
   let manual = $state<{ key: string; at: number } | null>(null);
   const openKey = $derived(manual && manual.at === f ? manual.key : autoKey);
 
@@ -389,7 +391,7 @@
 
   <div class="convo">
     <section class="t-panel transcript" aria-label="Transcript">
-      <div class="acc-list" data-acc-list bind:this={accList}>
+      <div class="acc-list" class:crowded={accCount >= 5} data-acc-list bind:this={accList}>
         <AccItem id="setup" open={openKey === 'setup'} ontoggle={toggleItem}>
           {#snippet head()}
             <Wrench size={13} />
@@ -642,6 +644,10 @@
     flex-direction: column;
     gap: 4px;
     overflow: auto;
+  }
+  /* Many turns: keep the open turn readable (it carries the long result) and let the list scroll instead. */
+  .acc-list.crowded :global(.acc.open[data-acc^='turn-']) {
+    min-height: 190px;
   }
 
   /* header snippets (rendered inside AccItem, styled here) */

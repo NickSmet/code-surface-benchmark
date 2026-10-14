@@ -56,9 +56,9 @@
     transition: border-color 0.12s, background 0.12s;
   }
   .acc.open {
-    /* The open item takes the spare height; its body scrolls, its header never does. */
-    flex: 1 1 190px;
-    min-height: 190px;
+    /* The open item is as tall as its content. When the list is too short for that,
+       it is the only thing that shrinks: its body scrolls, its header never does. */
+    flex: 0 1 auto;
     border-color: var(--color-border-strong);
   }
   .acc.current {
@@ -113,7 +113,7 @@
     flex: none;
   }
   .body {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
     padding: 2px 10px 10px 12px;
