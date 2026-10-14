@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { tick } from 'svelte';
   import { page } from '$app/state';
   import { browser } from '$app/environment';
   import { replaceState } from '$app/navigation';
@@ -7,10 +6,13 @@
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { CATALOG_TOOLS } from '$lib/surfaces/catalog/schemas';
   import { TASKS } from '$lib/tasks';
-  import AccItem from '$lib/components/tour/AccItem.svelte';
+  import CallDetail from '$lib/components/tour/CallDetail.svelte';
+  import CallRail from '$lib/components/tour/CallRail.svelte';
   import EstateMap, { type GroupPaint } from '$lib/components/tour/EstateMap.svelte';
+  import ResultModal from '$lib/components/tour/ResultModal.svelte';
   import Segmented from '$lib/components/tour/Segmented.svelte';
   import StatTile from '$lib/components/tour/StatTile.svelte';
+  import TabStrip, { type TabItem } from '$lib/components/tour/TabStrip.svelte';
   import TouchLegend from '$lib/components/tour/TouchLegend.svelte';
   import TourNav from '$lib/components/tour/TourNav.svelte';
   import Transport from '$lib/components/tour/Transport.svelte';
@@ -18,10 +20,11 @@
   import UnitCard from '$lib/components/tour/UnitCard.svelte';
   import type { TaskId } from '$lib/tour/answers';
   import { buildEstateModel } from '$lib/tour/estate';
+  import { prettyJson } from '$lib/tour/json-highlight';
   import { needleFor } from '$lib/tour/needles';
   import { COLORS, touchPaint, type Paint } from '$lib/tour/paint';
-  import type { ReplayCall } from '$lib/tour/replay';
-  import { argsLine, billedAt, callSummary, costFacts, lastFrame, stepBadge, turnAt } from '$lib/tour/replay-view';
+  import type { ReplayCall, ReplayTurn } from '$lib/tour/replay';
+  import { billedAt, callSummary, costFacts, lastFrame, promptSplit, stepBadge, turnAt } from '$lib/tour/replay-view';
   import { CATALOG_ROUTES, replayCatalog, taskPrompt } from '$lib/tour/scenarios';
   import { countMarks, marksAt, type TouchKind } from '$lib/tour/touch';
   import { fmtTokens } from '$lib/tour/tokens';
@@ -76,8 +79,6 @@
   const autoId = $derived(callUnits.size === 1 ? [...callUnits][0] : null);
   const focusId = $derived(pinnedId ?? hoverId ?? autoId);
 
-  let accList = $state<HTMLElement | null>(null);
-
   // ── the replay ─────────────────────────────────────────────────────
   const routes = $derived(CATALOG_ROUTES[taskId]);
   const route = $derived(routes.find((r) => r.id === routeId) ?? routes[0]);
@@ -112,21 +113,62 @@
     return `The model writes the answer. It touched ${counts.touched} resources to get there; the question needed ${needleCount}.`;
   });
 
-  // ── the transcript accordion ───────────────────────────────────────
-  // One item is open at a time. By default it is wherever the playhead is; opening
-  // another is remembered only until the playhead moves.
+  // ── the transcript tabs ────────────────────────────────────────────
+  // One tab is open at a time, and it is wherever the playhead is. Opening another
+  // is remembered only until the playhead moves.
+  const keyOf = (t: ReplayTurn): string => (t.calls.length > 0 ? `turn-${t.n}` : 'answer');
   const autoKey = $derived(f === 0 ? 'you' : f >= last ? 'answer' : `turn-${turnNow}`);
-  // Setup, You, and every turn that has started: with many of them the open item gets a minimum height.
-  const accCount = $derived(2 + replay.turns.filter((t) => (t.calls.length > 0 ? t.calls[0].step <= f : f === last)).length);
+  /** Turns whose request has been sent by now: each one is a tab. */
+  const startedTurns = $derived(replay.turns.filter((t) => (t.calls.length > 0 ? t.calls[0].step <= f : f === last)));
+  const keys = $derived(['setup', 'you', ...startedTurns.map(keyOf)]);
   let manual = $state<{ key: string; at: number } | null>(null);
-  const openKey = $derived(manual && manual.at === f ? manual.key : autoKey);
+  const openKey = $derived(manual && manual.at === f && keys.includes(manual.key) ? manual.key : autoKey);
 
-  function toggleItem(key: string): void {
+  const tabs = $derived.by((): TabItem[] => {
+    const away = (key: string): boolean => key === autoKey && openKey !== autoKey;
+    const items: TabItem[] = [
+      { id: 'setup', label: 'Setup', icon: Wrench, title: 'Instructions and tool definitions, sent on every turn' },
+      { id: 'you', label: 'You', icon: User, tone: 'you', title: 'The question', here: away('you') }
+    ];
+    for (const t of startedTurns) {
+      const key = keyOf(t);
+      if (t.calls.length > 0) {
+        items.push({ id: key, label: `Turn ${t.n}`, title: `Turn ${t.n}: ${callNames(t.calls.filter((c) => c.step <= f))}`, here: away(key) });
+      } else {
+        items.push({ id: key, label: 'Answer', icon: Bot, tone: 'answer', title: 'The model writes its answer', here: away(key) });
+      }
+    }
+    return items;
+  });
+
+  function selectTab(key: string): void {
     if (playing) {
       playing = false;
       syncUrl();
     }
-    manual = { key: openKey === key ? '' : key, at: f };
+    manual = key === autoKey ? null : { key, at: f };
+  }
+
+  // What the open tab shows. A turn shows one of its calls: the one the replay is on, or else its last.
+  const openTurn = $derived(replay.turns.find((t) => t.calls.length > 0 && `turn-${t.n}` === openKey) ?? null);
+  const openCalls = $derived(openTurn ? openTurn.calls.filter((c) => c.step <= f) : []);
+  const shownCall = $derived(openCalls.find((c) => c.step === f) ?? openCalls[openCalls.length - 1] ?? null);
+  const answerTurn = $derived(replay.turns[replay.turns.length - 1]);
+  /** How a request was made up: tokens it repeats from the one before, and tokens that are new. */
+  function sentBy(turn: ReplayTurn): { total: number; cached: number; fresh: number } {
+    const s = promptSplit(replay.turns, replay.turns.indexOf(turn));
+    return { total: turn.promptTokens, cached: s.cachedTokens, fresh: s.freshTokens };
+  }
+
+  // The whole result of one call, in a dialog.
+  let modalStep = $state<number | null>(null);
+  const modalCall = $derived(modalStep !== null ? (replay.calls[modalStep - 1] ?? null) : null);
+  function openResult(step: number): void {
+    if (playing) {
+      playing = false;
+      syncUrl();
+    }
+    modalStep = step;
   }
 
   /** "get_resource ×3", "list_resources, get_resource ×19". */
@@ -219,33 +261,6 @@
     return () => clearInterval(id);
   });
 
-  /** Scroll `box` (and only `box`) just enough to show `el`; when `el` is taller than the box, show its top. */
-  function reveal(box: HTMLElement, el: HTMLElement, pad = 6): void {
-    const b = box.getBoundingClientRect();
-    const r = el.getBoundingClientRect();
-    if (r.height + 2 * pad >= b.height || r.top < b.top + pad) box.scrollTop += r.top - b.top - pad;
-    else if (r.bottom > b.bottom - pad) box.scrollTop += r.bottom - b.bottom + pad;
-  }
-
-  // Keep the open item, and the current call inside it, in view.
-  $effect(() => {
-    void openKey;
-    void f;
-    void replay;
-    void tick().then(() => {
-      const list = accList;
-      if (!list) return;
-      const item = list.querySelector<HTMLElement>(`[data-acc="${openKey}"]`);
-      if (!item) return;
-      reveal(list, item);
-      const body = item.querySelector<HTMLElement>('[role=region]');
-      if (!body) return;
-      const el = body.querySelector<HTMLElement>('[data-current]') ?? body.querySelector<HTMLElement>('[data-tail]');
-      if (el) reveal(body, el);
-      else body.scrollTop = 0;
-    });
-  });
-
   // ── map painting ───────────────────────────────────────────────────
   function paintOf(id: string): Paint {
     const mark = marks.resources.get(id);
@@ -270,20 +285,13 @@
     return `${u.name}${extra}${touched ? '. Touched so far.' : '. Untouched so far.'}`;
   }
 
-  function pretty(text: string, max = 1000): string {
-    let out = text;
-    try {
-      out = JSON.stringify(JSON.parse(text), null, 2);
-    } catch {
-      /* not JSON: show as is */
-    }
-    return out.length > max ? `${out.slice(0, max)}\n\u2026 ${(out.length - max).toLocaleString('en-US')} more characters` : out;
-  }
-
   function onWindowKey(e: KeyboardEvent): void {
+    // While the result is open nothing behind it moves, wherever focus has landed. (Escape is the dialog's own.)
+    if (modalStep !== null) return;
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target instanceof HTMLElement ? e.target : null;
-    if (t?.closest('input, textarea, select, [role=radio], [role=tab], [data-unit]') || t?.isContentEditable) return;
+    // Keys inside a form control, a tab list, the pod map or the result dialog belong to that widget.
+    if (t?.closest('input, textarea, select, dialog, [role=radio], [role=tab], [data-unit]') || t?.isContentEditable) return;
     if (e.key === 'ArrowRight') setFrame(f + 1);
     else if (e.key === 'ArrowLeft') setFrame(f - 1);
     else if (e.key === 'Home') setFrame(0);
@@ -391,92 +399,59 @@
 
   <div class="convo">
     <section class="t-panel transcript" aria-label="Transcript">
-      <div class="acc-list" class:crowded={accCount >= 5} data-acc-list bind:this={accList}>
-        <AccItem id="setup" open={openKey === 'setup'} ontoggle={toggleItem}>
-          {#snippet head()}
-            <Wrench size={13} />
-            <span class="h-t">Setup</span>
-            <span class="h-m prose">{fmtTokens(setup.system + setup.tools)} tokens, sent again on every turn</span>
-          {/snippet}
+      <div class="tabs">
+        <TabStrip items={tabs} selected={openKey} onselect={selectTab} label="Transcript, one tab per turn" panelId="transcript-panel" smooth={!playing} />
+      </div>
+      <div
+        class="panel"
+        id="transcript-panel"
+        role="tabpanel"
+        aria-labelledby="tab-{openKey}"
+        data-tone={openKey === 'you' ? 'you' : openKey === 'answer' ? 'answer' : 'plain'}
+      >
+        {#if openKey === 'setup'}
           <p class="b-text">
-            Instructions <strong>{fmtInt(setup.system)}</strong> + {toolNames.length} tool definitions <strong>{fmtInt(setup.tools)}</strong>
-            tokens, before the model reads a word of the question.
+            <strong>{fmtInt(setup.system)}</strong> tokens of instructions and <strong>{fmtInt(setup.tools)}</strong> for {toolNames.length}
+            tool definitions, before the model reads a word of the question.
           </p>
           <p class="chips">
             {#each toolNames as n (n)}<span class="t-chip">{n}</span>{/each}
           </p>
-        </AccItem>
-
-        <AccItem id="you" tone="you" open={openKey === 'you'} ontoggle={toggleItem} current={autoKey === 'you'}>
-          {#snippet head()}
-            <User size={13} />
-            <span class="h-t">You</span>
-            {#if openKey !== 'you'}<span class="h-m prose">{taskPrompt(taskId)}</span>{/if}
-          {/snippet}
+          <p class="b-note">Sent in full on turn 1. From turn 2 on it is the same text, so it can be cached.</p>
+        {:else if openKey === 'you'}
           <p class="b-text">{taskPrompt(taskId)}</p>
           {#if f === 0}
             <button type="button" class="t-btn primary sm start" onclick={togglePlay}><Play size={14} /> Play the run</button>
           {/if}
-        </AccItem>
-
-        {#each replay.turns as turn, ti (turn.n)}
-          {@const started = turn.calls.length > 0 ? turn.calls[0].step <= f : f === last}
-          {#if started}
-            {@const prev = ti > 0 ? replay.turns[ti - 1].promptTokens : 0}
-            {#if turn.calls.length > 0}
-              {@const key = `turn-${turn.n}`}
-              {@const dense = turn.calls.length > 6}
-              <AccItem id={key} scrolls open={openKey === key} ontoggle={toggleItem} current={autoKey === key}>
-                {#snippet head()}
-                  <span class="h-t">Turn {turn.n}</span>
-                  <span class="h-m">{callNames(turn.calls.filter((c) => c.step <= f))}</span>
-                  <span class="h-r">
-                    {fmtTokens(turn.promptTokens)} tokens{#if ti > 0}<span class="delta"> +{fmtTokens(turn.promptTokens - prev)}</span>{/if}
-                  </span>
-                {/snippet}
-                <ol class="calls" class:dense>
-                  {#each turn.calls as c (c.step)}
-                    {#if c.step <= f}
-                      <li class="call" class:current={c.step === f} data-current={c.step === f ? '' : undefined}>
-                        <button
-                          type="button"
-                          class="call-btn"
-                          onclick={() => setFrame(c.step)}
-                          onmouseenter={() => (hoverStep = c.step)}
-                          onmouseleave={() => (hoverStep = null)}
-                          onfocus={() => (hoverStep = c.step)}
-                          onblur={() => (hoverStep = null)}
-                          aria-current={c.step === f ? 'step' : undefined}
-                        >
-                          <span class="num">{c.step}</span>
-                          <span class="tool">{c.name}</span>
-                          <span class="args">{argsLine(c.args)}</span>
-                          <span class="tok">+{fmtTokens(c.resultTokens)}</span>
-                        </button>
-                        {#if c.step === f}
-                          <p class="sum">{callSummary(c, nameOf)}</p>
-                          <!-- Scrollable region: focusable on purpose so keyboard users can scroll the result. -->
-                          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-                          <pre class="t-json result" role="region" aria-label="Result of step {c.step}" tabindex="0">{pretty(c.content)}</pre>
-                        {/if}
-                      </li>
-                    {/if}
-                  {/each}
-                </ol>
-              </AccItem>
-            {:else}
-              <AccItem id="answer" tone="answer" open={openKey === 'answer'} ontoggle={toggleItem} current={autoKey === 'answer'}>
-                {#snippet head()}
-                  <Bot size={13} />
-                  <span class="h-t">Answer</span>
-                  <span class="h-m prose">turn {turn.n} reads {fmtTokens(turn.promptTokens)} tokens{#if ti > 0}<span class="delta"> +{fmtTokens(turn.promptTokens - prev)}</span>{/if}</span>
-                  <span class="h-r good">≈ {fmtInt(replay.totals.answerTokens)} tokens</span>
-                {/snippet}
-                <p class="b-text pre" data-tail>{turn.text}</p>
-              </AccItem>
+        {:else if openTurn && shownCall}
+          <div class="turn" class:multi={openTurn.calls.length > 1}>
+            {#if openTurn.calls.length > 1}
+              <CallRail
+                calls={openCalls}
+                shown={shownCall.step}
+                now={f}
+                onpick={setFrame}
+                onhover={(s) => (hoverStep = s)}
+                label="Calls in turn {openTurn.n}"
+              />
             {/if}
-          {/if}
-        {/each}
+            {#key shownCall.step}
+              <CallDetail
+                call={shownCall}
+                summary={callSummary(shownCall, nameOf)}
+                now={shownCall.step === f}
+                sent={sentBy(openTurn)}
+                onexpand={() => openResult(shownCall.step)}
+              />
+            {/key}
+          </div>
+        {:else if openKey === 'answer'}
+          {@const sent = sentBy(answerTurn)}
+          <p class="b-text pre">{answerTurn.text}</p>
+          <p class="b-note">
+            Turn {answerTurn.n} read {fmtTokens(sent.total)} tokens ({fmtTokens(sent.cached)} cached, {fmtTokens(sent.fresh)} new) and wrote ≈ {fmtInt(replay.totals.answerTokens)} tokens.
+          </p>
+        {/if}
       </div>
     </section>
 
@@ -487,8 +462,9 @@
           <summary>How honest is this replay?</summary>
           <p>
             Pre-recorded, not a live model. Every tool result is the real output of the benchmark&rsquo;s catalogue over this estate, and tokens are billed the way the benchmark bills them
-            (characters &divide; 4, every turn re-sends everything, no prompt caching). The scripts are idealised: they add the numbers exactly, where live models got the two hard tasks
-            wrong.
+            (characters &divide; 4, every turn re-sends everything, no prompt caching). The grey parts of each bar are text the model already got in the previous request, so a provider with
+            prompt caching could reuse them at a discount; the totals here assume none. The scripts are idealised: they add the numbers exactly, where live models got the two hard
+            tasks wrong.
           </p>
         </details>
       </div>
@@ -503,6 +479,18 @@
     </section>
   </div>
 </div>
+
+{#if modalCall}
+  <ResultModal
+    step={modalCall.step}
+    title={modalCall.name}
+    subtitle={modalCall.argsText}
+    text={prettyJson(modalCall.content)}
+    sentChars={modalCall.content.length}
+    sentTokens={modalCall.resultTokens}
+    onclose={() => (modalStep = null)}
+  />
+{/if}
 
 <style>
   .screen {
@@ -622,7 +610,7 @@
     font-size: 13px;
   }
 
-  /* ── conversation: transcript accordion and cost ────────────────── */
+  /* ── conversation: transcript tabs and cost ─────────────────────── */
   .convo {
     flex: 1 1 0;
     min-height: 250px;
@@ -635,66 +623,45 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: 6px;
+    overflow: hidden;
   }
-  .acc-list {
-    flex: 1;
+  .tabs {
+    flex: none;
+    padding: 5px 6px 0;
+  }
+  /* The open tab gets everything that is left; the tabs never grow. */
+  .panel {
+    flex: 1 1 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    padding: 10px 12px 12px;
     overflow: auto;
+    background: white;
   }
-  /* Many turns: keep the open turn readable (it carries the long result) and let the list scroll instead. */
-  .acc-list.crowded :global(.acc.open.scrolls) {
-    min-height: 190px;
+  .panel[data-tone='you'] {
+    background: var(--color-brand-bg);
   }
-
-  /* header snippets (rendered inside AccItem, styled here) */
-  .h-t {
-    flex: none;
-    font-size: 11.5px;
-    font-weight: 800;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: var(--color-text-primary);
-    white-space: nowrap;
+  .panel[data-tone='answer'] {
+    background: var(--good-bg);
   }
-  .h-m {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    color: var(--color-text-muted);
+  .turn {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
-  .h-m.prose {
-    font-family: inherit;
-    font-size: 13px;
-  }
-  .h-r {
-    flex: none;
-    margin-left: auto;
-    font-family: var(--font-mono);
-    font-size: 12.5px;
-    color: var(--color-text-secondary);
-    white-space: nowrap;
-  }
-  .h-r.good {
-    font-weight: 700;
-    color: var(--good);
-  }
-  .delta {
-    margin-left: 0.45em;
-    color: #b45309;
+  .turn.multi {
+    display: grid;
+    grid-template-columns: clamp(170px, 30%, 260px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 10px;
   }
 
-  /* bodies */
+  /* the short tabs: setup, question, answer */
   .b-text {
-    margin: 2px 0 0;
-    font-size: 13.5px;
+    margin: 0;
+    font-size: 14px;
     line-height: 1.5;
     color: var(--color-text-secondary);
   }
@@ -708,88 +675,14 @@
     flex-wrap: wrap;
     gap: 4px;
   }
-  .start {
-    margin-top: 8px;
-  }
-
-  .calls {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-  }
-  .call {
-    border-radius: 8px;
-  }
-  .call.current {
-    background: var(--color-brand-bg);
-    box-shadow: inset 2px 0 0 var(--color-brand);
-  }
-  .call-btn {
-    display: grid;
-    grid-template-columns: 22px auto minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    width: 100%;
-    text-align: left;
-    padding: 3px 8px 3px 4px;
-    border-radius: 8px;
-  }
-  .call-btn:hover {
-    background: rgba(99, 102, 241, 0.08);
-  }
-  .dense .call-btn {
-    padding-top: 1px;
-    padding-bottom: 1px;
-  }
-  .num {
-    display: grid;
-    place-items: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #e6e8fe;
-    color: #4338ca;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 800;
-  }
-  .current .num {
-    background: var(--color-brand);
-    color: white;
-  }
-  .tool {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 800;
-    white-space: nowrap;
-  }
-  .args {
-    min-width: 0;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--color-text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .tok {
-    font-family: var(--font-mono);
+  .b-note {
+    margin: 8px 0 0;
     font-size: 12.5px;
-    font-weight: 700;
-    color: #4338ca;
+    color: var(--color-text-muted);
   }
-  .sum {
-    margin: 0 8px 4px 34px;
-    font-size: 13px;
-    color: var(--color-text-secondary);
-  }
-  .result {
-    margin: 0 8px 8px 34px;
-    font-size: 12px;
-    line-height: 1.45;
+  .start {
+    align-self: flex-start;
+    margin-top: 10px;
   }
 
   /* cost */
@@ -855,12 +748,19 @@
       flex: none;
       grid-template-rows: none;
     }
+    /* Stacked: the tabs need a definite height so the open one can fill it and scroll inside. */
     .transcript {
-      max-height: 70dvh;
+      height: min(70dvh, 540px);
     }
     .cost-chart {
       height: 180px;
       flex: none;
+    }
+  }
+  @media (max-width: 700px) {
+    .turn.multi {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: 132px minmax(0, 1fr);
     }
   }
 </style>
