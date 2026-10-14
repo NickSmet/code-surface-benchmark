@@ -32,7 +32,9 @@
   const trace = traceAccess(program, projection);
   const blocks = programBlocks(program);
   const contract = contractExcerpt(SCHEMA_DOC);
-  const descriptionTokens = estimateTokens(CODE_TOOLS[0].function.description);
+  // The whole definition the model is sent for the tool (name, description, parameters): the very number the
+  // language screen holds its own tool definitions against, so the two screens never quote two sizes for one tool.
+  const definitionTokens = estimateTokens(JSON.stringify(CODE_TOOLS));
   const stored = inv.resources.find((r) => r.name === VM_NAME)!;
   const projected = projection.resources.find((r) => r.name === VM_NAME)!;
   const removedFields = Object.keys(stored).filter((k) => !(k in projected));
@@ -186,7 +188,7 @@
   <section class="t-panel stage-panel" aria-label="The estate becoming an object">
     <div class="stage-wrap">
       <div class="stage-box">
-        <ObjectStage {t} label={stageLabel} {stage} {trace} code={program} {blocks} {contract} {descriptionTokens} {removedFields} />
+        <ObjectStage {t} label={stageLabel} {stage} {trace} code={program} {blocks} {contract} {definitionTokens} {removedFields} />
       </div>
     </div>
   </section>

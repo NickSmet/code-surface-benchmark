@@ -9,7 +9,8 @@
     { href: '/tour/strains', title: 'Where it strains', hint: 'Each question strains the tools somewhere else' },
     { href: '/tour/language', title: 'A language', hint: 'The catalogue grows up' },
     { href: '/tour/object', title: 'The object', hint: 'Reshape the estate into plain data' },
-    { href: '/tour/code', title: 'Code surface', hint: 'Programs over the object' }
+    { href: '/tour/code', title: 'Code surface', hint: 'Programs over the object' },
+    { href: '/tour/results', title: 'Results', hint: 'How each method holds up as the model gets weaker' }
   ];
 
   const currentIndex = $derived(steps.findIndex((s) => page.url.pathname.startsWith(s.href)));
@@ -164,13 +165,14 @@
     background: var(--color-brand-bg);
   }
 
-  @media (max-width: 1350px) {
+  /* Seven steps and the tagline need about 1590px. Without the tagline they need about 1425px; tighter pills and joints carry them down to about 1310px.
+     Each breakpoint keeps about 30px to spare for other fonts. Below 1340px the steps get a row of their own. */
+  @media (max-width: 1620px) {
     .brand-sub {
       display: none;
     }
   }
-  /* Six steps need about 1260px at full size. Tighter pills and joints carry them down to about 1210px. Below 1250px, with room to spare for other fonts, the steps get a row of their own. */
-  @media (max-width: 1300px) {
+  @media (max-width: 1450px) {
     .steps {
       gap: 2px;
     }
@@ -183,7 +185,7 @@
       padding-right: 8px;
     }
   }
-  @media (max-width: 1250px) {
+  @media (max-width: 1340px) {
     .tour-top {
       height: auto;
       flex-wrap: wrap;

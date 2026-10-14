@@ -74,10 +74,22 @@ const plural = (v: number, one: string, many = `${one}s`): string => `${n(v)} ${
 
 type Listing = { count: number; resources: Array<{ powerState?: string }> };
 
-/** The language screen's ladder or grow-the-language section, with the state a link asks for. */
+/** Where a link into the language screen says it came from, so that screen can offer the way back to the beat. */
+export const ORIGIN = /^strains:(\d+)$/;
+
+/** `href`, with the beat it was followed from. */
+export function withOrigin(href: string, at: number): string {
+  const [path, hash] = href.split('#');
+  return `${path}${path.includes('?') ? '&' : '?'}from=strains:${at}${hash === undefined ? '' : `#${hash}`}`;
+}
+
+/**
+ * The language screen at a rung of the ladder, or at its grow-the-language step with some features switched on.
+ * (`grow` wins over `rung`: that step is not on the ladder.)
+ */
 export const strainLink = (rung: RungId | null, features: FeatureId[] = [], grow = false): string => {
-  const qs = [rung ? `rung=${rung}` : '', features.length ? `f=${features.join(',')}` : ''].filter(Boolean).join('&');
-  return `/tour/language${qs ? `?${qs}` : ''}${grow ? '#grow' : ''}`;
+  const qs = [grow ? 'stage=grow' : rung ? `rung=${rung}` : '', features.length ? `f=${features.join(',')}` : ''].filter(Boolean).join('&');
+  return `/tour/language${qs ? `?${qs}` : ''}`;
 };
 
 /**
@@ -130,8 +142,6 @@ export function buildStrains(inv: Inventory, rungs: Rung[]): Strain[] {
       case 'arithmetic': {
         const list = JSON.parse(replay.calls[0].content) as Listing;
         const running = list.resources.filter((r) => r.powerState === 'running').length;
-        const plain = rung('filter');
-        const calc = rung('calculator');
         return {
           ...base,
           strain: {
@@ -140,7 +150,9 @@ export function buildStrains(inv: Inventory, rungs: Rung[]): Strain[] {
           },
           fix: {
             label: 'Give it a calculator',
-            text: `The sums come out exact, but the calculator cannot see the estate: the model copies each figure into a call. \u2248 ${fmtTokens(calc.bill.total)} tokens read and written, against \u2248 ${fmtTokens(plain.bill.total)}.`,
+            // No bill here. This row's bill is the tools screen's; the ladder prices the calculator against its own
+            // plain list, a different tool design, and two totals for one question side by side would contradict.
+            text: `The sums come out exact, but the calculator cannot see the estate: the model copies each figure into a call, and one more turn reads the whole list again. Exact, not cheaper: the next screen has the bill.`,
             adds: 'calculate(expression)',
             href: strainLink('calculator'),
             cta: 'See the calculator'
@@ -157,7 +169,8 @@ export function buildStrains(inv: Inventory, rungs: Rung[]): Strain[] {
           },
           fix: {
             label: 'Wider tools, then filters in the tool',
-            text: `Fold the lookups into fewer, wider calls, then filter across VMs inside the tool. On the next screen the same question goes from ${plural(rung('per-property').replay.totals.calls, 'call')} to ${rung('filter').replay.totals.calls}.`,
+            // The ladder starts further back than the tools screen's cautious route (19 calls): one tool per property.
+            text: `Fold the lookups into fewer, wider calls, then let the tool filter across VMs so the model does not visit each one. The ladder on the next screen starts further back, with one tool per property: ${plural(rung('per-property').replay.totals.calls, 'call')} for this question, and ${plural(rung('filter').replay.totals.calls, 'call')} by rung ${rung('filter').n}.`,
             adds: 'filters',
             href: strainLink(null),
             cta: 'Climb the ladder'

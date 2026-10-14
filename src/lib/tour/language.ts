@@ -1063,9 +1063,11 @@ export const FRESH_QUESTIONS: FreshQuestion[] = [
     next: 'Follow references',
     code: `function main(data) {
   const byId = new Map(data.resources.map((r) => [r.id, r]));
+  const vmOf = (disk) => byId.get(disk.attachedToVmId);
+  const stopped = ['stopped', 'deallocated'];
   return data.resources
-    .filter((r) => r.type === 'disk' && ['stopped', 'deallocated'].includes(byId.get(r.attachedToVmId)?.powerState))
-    .map((r) => ({ disk: r.name, vm: byId.get(r.attachedToVmId).name }));
+    .filter((r) => r.type === 'disk' && stopped.includes(vmOf(r)?.powerState))
+    .map((r) => ({ disk: r.name, vm: vmOf(r).name }));
 }`
   },
   {
@@ -1117,9 +1119,10 @@ export const FRESH_QUESTIONS: FreshQuestion[] = [
     },
     next: 'Arithmetic in computed values',
     code: `function main(data) {
+  const perVcpu = (r) => Math.round((r.costMonthly / r.vcpus) * 100) / 100;
   return data.resources
     .filter((r) => r.type === 'virtualMachine')
-    .map((r) => ({ vm: r.name, perVcpu: Math.round((r.costMonthly / r.vcpus) * 100) / 100 }))
+    .map((r) => ({ vm: r.name, perVcpu: perVcpu(r) }))
     .sort((a, b) => b.perVcpu - a.perVcpu)
     .slice(0, 5);
 }`
