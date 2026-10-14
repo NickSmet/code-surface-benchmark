@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { ReplayTurn } from '$lib/tour/replay';
   import { PART_KEYS, promptSplit, type PartKey } from '$lib/tour/replay-view';
+  import { CACHE_TIP, OUTPUT_TIP } from '$lib/tour/explain';
   import { fmtTokens } from '$lib/tour/tokens';
+  import Tip from './Tip.svelte';
 
   interface Props {
     turns: ReplayTurn[];
@@ -16,20 +18,23 @@
   }
   let { turns, upTo, height = 150, fill = false, onturn }: Props = $props();
 
-  // Text that is new in a request is drawn in colour. Text the model already got in the
-  // request before is the same shape in grey: a provider with prompt caching can reuse it.
+  // A bar is one turn: what the model read (the big block) and, on top, what it wrote (amber).
+  // Text that is new in a request is drawn in colour. Text the model already got in the request
+  // before is the same shape in grey: a provider with prompt caching can reuse it.
+  // Amber is the model's own words: its call is output on the turn it is written, and input from
+  // the next turn on, when it is read back.
+  const OUT = '#f59e0b';
   const FRESH: Record<PartKey, { label: string; color: string; hint: string }> = {
     fixed: { label: 'Setup', color: '#475569', hint: 'Instructions and tool definitions' },
     user: { label: 'Question', color: '#0ea5e9', hint: 'The question you asked' },
-    calls: { label: 'Call', color: '#a5b4fc', hint: 'The model\u2019s tool calls' },
-    results: { label: 'Result', color: '#4f46e5', hint: 'What the tools sent back' }
+    calls: { label: 'Calls', color: OUT, hint: 'The calls the model wrote on earlier turns, read back as input' },
+    results: { label: 'Results', color: '#4f46e5', hint: 'What the tools sent back' }
   };
   const CACHED: Record<PartKey, string> = { fixed: '#e5e9f0', user: '#d5dbe5', calls: '#c4ccda', results: '#aeb8ca' };
-  const CACHE_HINT =
-    'Same text as the previous request, so a provider with prompt caching can reuse it at a discount. The totals on this page assume no caching.';
   const NAME: Record<PartKey, string> = { fixed: 'setup', user: 'question', calls: 'calls', results: 'results' };
 
-  const max = $derived(Math.max(1, ...turns.map((t) => t.promptTokens)));
+  /** One scale for both: the tallest turn is what it read plus what it wrote. */
+  const max = $derived(Math.max(1, ...turns.map((t) => t.promptTokens + t.completionTokens)));
   const dense = $derived(turns.length > 12);
 
   interface Seg {
@@ -49,19 +54,22 @@
     return `${(n / max) * 100}%`;
   }
   const n = (v: number): string => v.toLocaleString('en-US');
+  const writes = (t: ReplayTurn): string => (t.calls.length === 0 ? 'the answer' : t.calls.length === 1 ? 'one call' : `${n(t.calls.length)} calls`);
   function tip(t: ReplayTurn, i: number): string {
     const s = promptSplit(turns, i);
     const list = (p: Record<PartKey, number>): string =>
       PART_KEYS.filter((k) => p[k] > 0)
         .map((k) => `${n(p[k])} ${NAME[k]}`)
         .join(', ');
-    const head = `Turn ${t.n} sends ${n(t.promptTokens)} tokens.`;
-    if (s.cachedTokens === 0) return `${head} All of it is new: ${list(s.fresh)}.`;
-    return `${head} ${n(s.cachedTokens)} cached, the same as the previous request (${list(s.cached)}). ${n(s.freshTokens)} new (${list(s.fresh)}).`;
+    const head = `Turn ${t.n} reads ${n(t.promptTokens)} tokens and writes ${n(t.completionTokens)} (${writes(t)}).`;
+    if (s.cachedTokens === 0) return `${head}\nAll of the input is new: ${list(s.fresh)}.`;
+    return `${head}\nCached ${n(s.cachedTokens)}: the same as the previous request (${list(s.cached)}), usually billed at about a tenth.\nNew ${n(s.freshTokens)} (${list(s.fresh)}).`;
   }
   const showTick = (k: number): boolean => !dense || k === 1 || k === turns.length || k % 5 === 0;
   const summary = $derived(
-    `Tokens sent to the model on each of ${turns.length} turns: ${turns.map((t) => n(t.promptTokens)).join(', ')}. Grey is repeated from the previous turn.`
+    `Tokens read and written on each of ${turns.length} turns. ${turns
+      .map((t) => `Turn ${t.n} reads ${n(t.promptTokens)} and writes ${n(t.completionTokens)}`)
+      .join('; ')}. Grey is input repeated from the previous turn; amber is what the model wrote.`
   );
 </script>
 
@@ -72,29 +80,35 @@
       {#each turns as t, i (t.n)}
         {@const solid = t.n <= upTo}
         {@const segs = solid ? segments(i) : []}
-        {@const total = segs.reduce((sum, s) => sum + s.tokens, 0)}
         <button
           type="button"
           class="col"
           class:ghost={!solid}
           class:now={t.n === upTo}
-          style:height={pct(t.promptTokens)}
+          style:height={pct(t.promptTokens + t.completionTokens)}
           title={tip(t, i)}
           aria-label={tip(t, i)}
           onclick={() => onturn?.(t.n)}
           disabled={!onturn}
         >
-          {#each segs as s, si (`${s.cached ? 'c' : 'n'}-${s.key}`)}
-            <span
-              class="seg"
-              class:cached={s.cached}
-              class:top={si === segs.length - 1}
-              style:height={`${(s.tokens / total) * 100}%`}
-              style:background-color={s.cached ? CACHED[s.key] : FRESH[s.key].color}
-            ></span>
-          {/each}
+          {#if solid}
+            <span class="stack" style:flex="{t.promptTokens} {t.promptTokens} 0px">
+              {#each segs as s (`${s.cached ? 'c' : 'n'}-${s.key}`)}
+                <span
+                  class="seg"
+                  class:cached={s.cached}
+                  style:flex="{s.tokens} {s.tokens} 0px"
+                  style:background-color={s.cached ? CACHED[s.key] : FRESH[s.key].color}
+                ></span>
+              {/each}
+            </span>
+            <span class="cap" style:flex="{t.completionTokens} {t.completionTokens} 0px" style:background-color={OUT}></span>
+          {/if}
           {#if t.n === upTo || (!dense && solid)}
-            <span class="val" aria-hidden="true">{fmtTokens(t.promptTokens)}</span>
+            <span class="val" aria-hidden="true">
+              <b>{fmtTokens(t.promptTokens)}</b>
+              <i>out {fmtTokens(t.completionTokens)}</i>
+            </span>
           {/if}
         </button>
       {/each}
@@ -106,11 +120,19 @@
     {/each}
   </div>
   <figcaption class="legend">
-    <span class="lg-h">New</span>
-    {#each PART_KEYS as k (k)}
-      <span class="lg" title={FRESH[k].hint}><span class="sw" style:background-color={FRESH[k].color}></span>{FRESH[k].label}</span>
-    {/each}
-    <span class="lg cache" title={CACHE_HINT}><span class="sw hatch" style:background-color={CACHED.calls}></span>Cached</span>
+    <span class="lg-row">
+      <span class="lg-h">Input</span>
+      {#each PART_KEYS as k (k)}
+        <span class="lg" title={FRESH[k].hint}><span class="sw" style:background-color={FRESH[k].color}></span>{FRESH[k].label}</span>
+      {/each}
+      <span class="lg-sep">
+        <Tip class="lg" text={CACHE_TIP}><span class="sw hatch" style:background-color={CACHED.calls}></span>Cached</Tip>
+      </span>
+    </span>
+    <span class="lg-row">
+      <span class="lg-h">Output</span>
+      <Tip class="lg" text={OUTPUT_TIP}><span class="sw" style:background-color={OUT}></span>What the model writes</Tip>
+    </span>
   </figcaption>
 </figure>
 
@@ -128,12 +150,13 @@
   }
   .plot {
     position: relative;
-    padding-top: 20px;
+    /* Room above the tallest bar for its two-line label. */
+    padding-top: 32px;
     border-bottom: 1px solid var(--color-border-strong);
   }
   .fill .plot {
     flex: 1 1 0;
-    min-height: 64px;
+    min-height: 76px;
   }
   .ymax {
     position: absolute;
@@ -179,18 +202,29 @@
   .col.now {
     border-color: var(--color-text-primary);
   }
+  /* What the turn read, parts stacked from the bottom: repeated first, then new. */
+  .stack {
+    display: flex;
+    flex-direction: column-reverse;
+    min-height: 0;
+  }
   .seg {
     display: block;
     width: 100%;
-    flex: none;
+    min-height: 1px;
     /* A hairline between parts that takes no room, so thin parts keep their height. */
     box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.9);
   }
   .seg:first-child {
     box-shadow: none;
   }
-  .seg.top {
+  /* What the turn wrote, on the same scale. It is tiny next to what it read, so it never drops below a few pixels. */
+  .cap {
+    display: block;
+    width: 100%;
+    min-height: 3px;
     border-radius: 3px 3px 0 0;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9);
   }
   /* Cached text: the same grey family, lightly hatched so it does not depend on colour alone. */
   .seg.cached,
@@ -203,11 +237,23 @@
     bottom: 100%;
     transform: translateX(-50%);
     margin-bottom: 2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.15;
+    white-space: nowrap;
     font-family: var(--font-mono);
+  }
+  .val b {
     font-size: 12px;
     font-weight: 800;
     color: var(--color-text-primary);
-    white-space: nowrap;
+  }
+  .val i {
+    font-style: normal;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #b45309;
   }
   .xaxis {
     display: flex;
@@ -232,29 +278,35 @@
   }
   .legend {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 1px 11px;
+    flex-direction: column;
+    gap: 1px;
     font-size: 12px;
     color: var(--color-text-muted);
   }
+  .lg-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1px 11px;
+  }
   .lg-h {
+    /* Both headings are as wide as the longer one, so the swatches line up. */
+    min-width: 46px;
     font-size: 11px;
     font-weight: 800;
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--color-text-secondary);
   }
-  .lg {
+  .legend .lg,
+  .legend :global(.lg) {
     display: inline-flex;
     align-items: center;
     gap: 5px;
   }
-  .lg.cache {
-    margin-left: 4px;
+  .lg-sep {
     padding-left: 11px;
     border-left: 1px solid var(--color-border-strong);
-    cursor: help;
   }
   .sw {
     width: 10px;

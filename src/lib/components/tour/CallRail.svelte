@@ -55,7 +55,7 @@
           <span class="tool">{c.name}</span>
           <span class="prev">{c.preview}</span>
         </span>
-        <span class="tok">+{fmtTokens(c.resultTokens)}</span>
+        <span class="tok" title="Tokens this result adds to the next request">+{fmtTokens(c.resultSentTokens)}</span>
       </button>
     </li>
   {/each}

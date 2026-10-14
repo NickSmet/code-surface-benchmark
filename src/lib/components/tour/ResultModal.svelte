@@ -14,13 +14,15 @@
     subtitle?: string;
     /** The whole result, indented for reading. */
     text: string;
-    /** What the model actually receives: the compact text. */
-    sentChars: number;
-    sentTokens: number;
+    /** What the model actually receives: the compact text, in characters and in tokens. */
+    chars: number;
+    tokens: number;
+    /** What the result costs each time it is read again: the same text wrapped in its message. */
+    counted: number;
     /** Called once the dialog has closed, however it was closed. */
     onclose: () => void;
   }
-  let { step, title, subtitle = '', text, sentChars, sentTokens, onclose }: Props = $props();
+  let { step, title, subtitle = '', text, chars, tokens, counted, onclose }: Props = $props();
 
   let dialog = $state<HTMLDialogElement | null>(null);
   let copied = $state(false);
@@ -72,7 +74,8 @@
     <JsonView {text} label="Full result of step {step}, {title}" />
   </div>
   <footer class="foot">
-    Indented here to read. The model receives it compact: {fmtInt(sentChars)} characters, about {fmtTokens(sentTokens)} tokens.
+    Indented here to read. The model gets it compact: {fmtInt(chars)} characters, about {fmtTokens(tokens)} tokens.
+    Wrapped in its message, it counts as about {fmtTokens(counted)} tokens each time it is read again.
   </footer>
   <span class="t-sr" role="status">{copied ? 'Copied to the clipboard' : ''}</span>
 </dialog>

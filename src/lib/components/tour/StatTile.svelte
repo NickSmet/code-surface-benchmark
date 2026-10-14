@@ -7,11 +7,13 @@
     tone?: string;
     /** Smaller number, for dense rows. */
     compact?: boolean;
+    /** More to know, shown on hover. */
+    hint?: string;
   }
-  let { label, value, sub, tone, compact = false }: Props = $props();
+  let { label, value, sub, tone, compact = false, hint }: Props = $props();
 </script>
 
-<div class="stat" class:compact>
+<div class="stat" class:compact title={hint}>
   <span class="label">{label}</span>
   <span class="value" style:color={tone}>{value}</span>
   {#if sub}<span class="sub">{sub}</span>{/if}

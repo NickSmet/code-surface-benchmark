@@ -6,13 +6,16 @@
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { CATALOG_TOOLS } from '$lib/surfaces/catalog/schemas';
   import { TASKS } from '$lib/tasks';
+  import { MAX_ITERATIONS } from '$lib/agent/limits';
   import CallDetail from '$lib/components/tour/CallDetail.svelte';
   import CallRail from '$lib/components/tour/CallRail.svelte';
   import EstateMap, { type GroupPaint } from '$lib/components/tour/EstateMap.svelte';
+  import FlowLine from '$lib/components/tour/FlowLine.svelte';
   import ResultModal from '$lib/components/tour/ResultModal.svelte';
   import Segmented from '$lib/components/tour/Segmented.svelte';
   import StatTile from '$lib/components/tour/StatTile.svelte';
   import TabStrip, { type TabItem } from '$lib/components/tour/TabStrip.svelte';
+  import Tip from '$lib/components/tour/Tip.svelte';
   import TouchLegend from '$lib/components/tour/TouchLegend.svelte';
   import TourNav from '$lib/components/tour/TourNav.svelte';
   import Transport from '$lib/components/tour/Transport.svelte';
@@ -20,11 +23,12 @@
   import UnitCard from '$lib/components/tour/UnitCard.svelte';
   import type { TaskId } from '$lib/tour/answers';
   import { buildEstateModel } from '$lib/tour/estate';
+  import { ANSWER_NOTE, CACHE_TIP } from '$lib/tour/explain';
   import { prettyJson } from '$lib/tour/json-highlight';
   import { needleFor } from '$lib/tour/needles';
   import { COLORS, touchPaint, type Paint } from '$lib/tour/paint';
   import type { ReplayCall, ReplayTurn } from '$lib/tour/replay';
-  import { billedAt, callSummary, costFacts, lastFrame, promptSplit, stepBadge, turnAt } from '$lib/tour/replay-view';
+  import { billedSplit, callSummary, costFacts, lastFrame, stepBadge, turnAt, turnFlow, type TurnFlow } from '$lib/tour/replay-view';
   import { CATALOG_ROUTES, replayCatalog, taskPrompt } from '$lib/tour/scenarios';
   import { countMarks, marksAt, type TouchKind } from '$lib/tour/touch';
   import { fmtTokens } from '$lib/tour/tokens';
@@ -94,8 +98,12 @@
   const marks = $derived(marksAt(replay.touches, f));
   const counts = $derived(countMarks(marks.resources));
   const turnNow = $derived(turnAt(replay, f));
-  const billedNow = $derived(billedAt(replay, f));
+  /** The bill so far: what the model has read and what it has written. */
+  const billed = $derived(billedSplit(replay, f));
+  const billedNow = $derived(billed.input + billed.output);
   const facts = $derived(costFacts(replay));
+  /** The benchmark stops a model that has not finished within this many turns; the replay lets it finish. */
+  const overCap = $derived(replay.turns.length > MAX_ITERATIONS);
   const unit = $derived(focusId ? (model.unitById.get(focusId) ?? null) : null);
   const setup = $derived({ system: replay.turns[0].parts.system, tools: replay.turns[0].parts.tools });
 
@@ -154,11 +162,8 @@
   const openCalls = $derived(openTurn ? openTurn.calls.filter((c) => c.step <= f) : []);
   const shownCall = $derived(openCalls.find((c) => c.step === f) ?? openCalls[openCalls.length - 1] ?? null);
   const answerTurn = $derived(replay.turns[replay.turns.length - 1]);
-  /** How a request was made up: tokens it repeats from the one before, and tokens that are new. */
-  function sentBy(turn: ReplayTurn): { total: number; cached: number; fresh: number } {
-    const s = promptSplit(replay.turns, replay.turns.indexOf(turn));
-    return { total: turn.promptTokens, cached: s.cachedTokens, fresh: s.freshTokens };
-  }
+  /** What a turn read and what it wrote: the line under its tab, in the chart's numbers. */
+  const flowOf = (turn: ReplayTurn): TurnFlow => turnFlow(replay.turns, replay.turns.indexOf(turn));
 
   // The whole result of one call, in a dialog.
   let modalStep = $state<number | null>(null);
@@ -417,7 +422,7 @@
           <p class="chips">
             {#each toolNames as n (n)}<span class="t-chip">{n}</span>{/each}
           </p>
-          <p class="b-note">Sent in full on turn 1. From turn 2 on it is the same text, so it can be cached.</p>
+          <p class="b-note">Read in full on turn 1. From turn 2 on it is the same text, so it can be <Tip text={CACHE_TIP}>cached</Tip>.</p>
         {:else if openKey === 'you'}
           <p class="b-text">{taskPrompt(taskId)}</p>
           {#if f === 0}
@@ -440,39 +445,48 @@
                 call={shownCall}
                 summary={callSummary(shownCall, nameOf)}
                 now={shownCall.step === f}
-                sent={sentBy(openTurn)}
+                flow={flowOf(openTurn)}
                 onexpand={() => openResult(shownCall.step)}
               />
             {/key}
           </div>
         {:else if openKey === 'answer'}
-          {@const sent = sentBy(answerTurn)}
           <p class="b-text pre">{answerTurn.text}</p>
-          <p class="b-note">
-            Turn {answerTurn.n} read {fmtTokens(sent.total)} tokens ({fmtTokens(sent.cached)} cached, {fmtTokens(sent.fresh)} new) and wrote ≈ {fmtInt(replay.totals.answerTokens)} tokens.
-          </p>
+          <div class="b-flow"><FlowLine flow={flowOf(answerTurn)} /></div>
+          <p class="b-note">{ANSWER_NOTE}</p>
         {/if}
       </div>
     </section>
 
     <section class="t-panel cost" aria-label="What it cost">
       <div class="cost-head">
-        <h2 class="t-h2">Sent to the model, turn by turn</h2>
+        <h2 class="t-h2">Input and output, turn by turn</h2>
         <details class="honest">
           <summary>How honest is this replay?</summary>
           <p>
-            Pre-recorded, not a live model. Every tool result is the real output of the benchmark&rsquo;s catalogue over this estate, and tokens are billed the way the benchmark bills them
-            (characters &divide; 4, every turn re-sends everything, no prompt caching). The grey parts of each bar are text the model already got in the previous request, so a provider with
-            prompt caching could reuse them at a discount; the totals here assume none. The scripts are idealised: they add the numbers exactly, where live models got the two hard
-            tasks wrong.
+            Pre-recorded, not a live model. Every tool result is the real output of the benchmark&rsquo;s catalogue over this estate, and tokens are counted the way the benchmark counts them:
+            characters &divide; 4, and every turn reads the whole conversation again. The totals are tokens, not dollars, and count cached text (grey) at full price; providers usually bill it
+            at about a tenth, and bill output at a higher rate than input. The scripts are idealised: they add the numbers exactly, where live models got the two hard tasks wrong.
           </p>
         </details>
       </div>
       <div class="cost-chart">
         <TurnBars fill turns={replay.turns} upTo={turnNow} onturn={jumpToTurn} />
       </div>
+      {#if overCap}
+        <p class="cap-note">
+          The benchmark stops a run after {MAX_ITERATIONS} turns, so a model working this slowly would not finish. The replay lets it, to show the bill.
+        </p>
+      {/if}
       <div class="cost-facts">
-        <StatTile compact label="Billed so far" value={'≈ ' + fmtTokens(billedNow)} sub="of ≈ {fmtTokens(facts.billed)} tokens" tone="#4338ca" />
+        <StatTile
+          compact
+          label="Billed so far"
+          value={'≈ ' + fmtTokens(billedNow)}
+          sub="{fmtTokens(billed.input)} in + {fmtTokens(billed.output)} out"
+          hint="The whole run: ≈ {fmtTokens(facts.billed)} tokens, {fmtTokens(replay.totals.promptTokens)} in + {fmtTokens(replay.totals.completionTokens)} out. Tokens, not dollars."
+          tone="#4338ca"
+        />
         <StatTile compact label="Billed ÷ text" value="{facts.multiple.toFixed(1)}×" sub="text is ≈ {fmtTokens(facts.once)} tokens" />
         <StatTile compact label="Setup share" value={Math.round(facts.fixedShare * 100) + '%'} sub="instructions + tools" />
       </div>
@@ -486,8 +500,9 @@
     title={modalCall.name}
     subtitle={modalCall.argsText}
     text={prettyJson(modalCall.content)}
-    sentChars={modalCall.content.length}
-    sentTokens={modalCall.resultTokens}
+    chars={modalCall.content.length}
+    tokens={modalCall.resultTokens}
+    counted={modalCall.resultSentTokens}
     onclose={() => (modalStep = null)}
   />
 {/if}
@@ -679,6 +694,19 @@
     margin: 8px 0 0;
     font-size: 12.5px;
     color: var(--color-text-muted);
+  }
+  .b-flow {
+    margin-top: 8px;
+  }
+  .cap-note {
+    margin: 0;
+    padding: 5px 8px;
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    background: #fffbeb;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: #92400e;
   }
   .start {
     align-self: flex-start;
