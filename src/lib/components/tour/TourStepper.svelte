@@ -7,7 +7,8 @@
     { href: '/tour/estate', title: 'The estate', hint: '194 things, many ways to look' },
     { href: '/tour/tools', title: 'Naive tools', hint: 'One call at a time' },
     { href: '/tour/language', title: 'A language', hint: 'The catalogue grows up' },
-    { href: '/tour/code', title: 'Code surface', hint: 'Hand over the object' }
+    { href: '/tour/object', title: 'The object', hint: 'Reshape the estate into plain data' },
+    { href: '/tour/code', title: 'Code surface', hint: 'Programs over the object' }
   ];
 
   const currentIndex = $derived(steps.findIndex((s) => page.url.pathname.startsWith(s.href)));

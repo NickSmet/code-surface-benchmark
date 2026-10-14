@@ -315,7 +315,7 @@
       {#if next}
         <button type="button" class="t-btn primary" onclick={() => select(next.id)}>Next: {next.title} <ChevronRight size={16} /></button>
       {:else}
-        <a class="t-btn primary" href="/tour/code?task=filter-aggregate">Watch it run on the estate <ChevronRight size={16} /></a>
+        <a class="t-btn primary" href="/tour/object">See how the estate becomes that object <ChevronRight size={16} /></a>
       {/if}
       {#if rung.id === 'query'}<a class="t-btn" href="#grow">Try growing it</a>{/if}
     </div>
@@ -357,7 +357,7 @@
           <li><code class="tn">operate_inventory</code><span class="tp">(code, rationale)</span></li>
         </ul>
         <p class="d-note">
-          ≈ {fmtInt(rung.setupTokens)} tokens of instructions and one tool whose description holds the shape of the data. See it on the estate on the <a href="/tour/code?task=filter-aggregate">next screen</a>.
+          ≈ {fmtInt(rung.setupTokens)} tokens of instructions and one tool whose description holds the shape of the data. See how the estate becomes that object on the <a href="/tour/object">next screen</a>.
         </p>
       {/if}
     </div>
@@ -569,11 +569,11 @@
 
   <p class="t-callout wrap">
     <strong>The language stops where somebody stopped building it.</strong> The code tool's description is the same ≈ {fmtInt(codeDefinition)} tokens whatever you ask, because it describes the data, and filter, group, sort and divide are things the model already knows.
-    <a href="/tour/code?task=filter-aggregate">See it run on the estate</a>.
+    <a href="/tour/object">See how the estate becomes that object</a>.
   </p>
 </section>
 
-<TourNav prev={{ href: '/tour/tools', label: 'Naive tools' }} next={{ href: '/tour/code', label: 'Code over the object' }} />
+<TourNav prev={{ href: '/tour/tools', label: 'Naive tools' }} next={{ href: '/tour/object', label: 'Reshape the estate into an object' }} />
 
 <style>
   .head {

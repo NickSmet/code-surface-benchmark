@@ -8,7 +8,8 @@ import { runBench } from '../src/lib/agent/loop';
 import { MAX_ITERATIONS } from '../src/lib/agent/limits';
 import { createCatalogSurface } from '../src/lib/surfaces/catalog';
 import { createCodeSurface } from '../src/lib/surfaces/code';
-import { OPERATE_NAME } from '../src/lib/surfaces/code/schemas';
+import { CODE_TOOLS, OPERATE_NAME } from '../src/lib/surfaces/code/schemas';
+import { SCHEMA_DOC } from '../src/lib/surfaces/code/helpers';
 import type { Surface } from '../src/lib/surfaces/types';
 import type { ChatTurnArgs, ProviderClient, ProviderToolCall } from '../src/lib/agent/providers/types';
 import { buildEstateModel } from '../src/lib/tour/estate';
@@ -42,6 +43,46 @@ import {
   type FeatureId,
   type QueryOut
 } from '../src/lib/tour/language';
+import {
+  ACTS,
+  AT,
+  GATE,
+  LAST_STEP,
+  LEFT,
+  OBJ,
+  PROGRAM_MAX_LINES,
+  RIGHT,
+  STEP_IDS,
+  ZOOM,
+  actOf,
+  buildObjectStage,
+  cellPose,
+  chipProgress,
+  chipRect,
+  closeUpOpacity,
+  contractOpacity,
+  ease,
+  estateOpacity,
+  findSweep,
+  flightWindow,
+  indexSweep,
+  landed,
+  landedCount,
+  linkDraw,
+  mixPose,
+  poseAt,
+  programLineOpacity,
+  programOpacity,
+  reach,
+  recordFieldsOpacity,
+  recordsOpacity,
+  resultOpacity,
+  seg,
+  shortSubId,
+  type Pose,
+  type StepId
+} from '../src/lib/tour/object-stage';
+import { contractExcerpt, programBlocks, shapeForDisplay, stepCopy, tokenizeLine, traceAccess, type CopyFacts } from '../src/lib/tour/object-trace';
 
 const truth = computeGroundTruth(buildInventory());
 
@@ -1161,4 +1202,364 @@ test('ladder facts quote the replay, and every example query runs once the featu
     if (!without.ok) assert.equal(without.needs, needs[e.id][0], `${e.id}: the error names the feature`);
     assert.ok(runQuery(inv, e.query, new Set(needs[e.id])).ok, `${e.id} with ${needs[e.id]}`);
   }
+});
+
+// ── the object screen: the estate becomes one plain object, then a program reads it ──
+
+const objInv = buildInventory();
+const objProj = buildProjection(objInv);
+const objStage = buildObjectStage(objInv, objProj, { vmName: 'web-prod-03' });
+const objCode = programs['granular-read'].code;
+const objTrace = traceAccess(objCode, objProj);
+const objFacts: CopyFacts = {
+  trace: objTrace,
+  resources: objStage.counts.resources,
+  subscriptions: objStage.counts.subscriptions,
+  groups: objStage.counts.groups,
+  vmName: 'web-prod-03'
+};
+
+const near = (a: number, b: number, eps = 1e-9): boolean => Math.abs(a - b) <= eps;
+function assertPose(actual: Pose, expected: Pose, what: string): void {
+  for (const k of ['cx', 'cy', 'w', 'h', 'r'] as const) assert.ok(near(actual[k], expected[k]), `${what}: ${k} is ${actual[k]}, expected ${expected[k]}`);
+}
+/** The positions of motion `t` from `from` to `to`, `step` apart. */
+function sweepOf(from: number, to: number, step: number): number[] {
+  const out: number[] = [];
+  for (let t = from; t <= to + 1e-9; t += step) out.push(Math.round(t * 1000) / 1000);
+  return out;
+}
+const objRecord = (i: number): Record<string, unknown> => objProj.resources[i] as unknown as Record<string, unknown>;
+
+test('object stage: one glyph per resource, in data.resources order, from its own pod to its own cell', () => {
+  assert.equal(objStage.glyphs.length, objProj.resources.length);
+  assert.deepEqual(objStage.counts, { subscriptions: 2, groups: 6, resources: 194 });
+  const cells = new Set<string>();
+  objStage.glyphs.forEach((g, i) => {
+    const r = objProj.resources[i];
+    assert.equal(g.index, i);
+    assert.equal(g.id, r.id, `glyph ${i} is the resource at data.resources[${i}]`);
+    assert.equal(g.type, r.type);
+    assert.deepEqual(g.cell, cellPose(i));
+    cells.add(`${g.cell.cx},${g.cell.cy}`);
+    const card = objStage.groups.find((c) => c.name === g.groupName)!;
+    assert.ok(g.estate.cx > card.x && g.estate.cx < card.x + card.w && g.estate.cy > card.y && g.estate.cy < card.y + card.h, `${g.name} starts inside ${g.groupName}`);
+    assert.ok(g.cell.cx - g.cell.w / 2 >= RIGHT.x && g.cell.cx + g.cell.w / 2 <= RIGHT.x + RIGHT.w, `${g.name}: its cell is inside the object's card`);
+  });
+  assert.equal(cells.size, 194, 'no two resources share a cell');
+  const lastCell = cellPose(193);
+  assert.ok(lastCell.cy + lastCell.h / 2 < OBJ.recordsY - 24, 'the array ends above the records caption');
+  assert.ok(objStage.groups.every((c) => c.x + c.w <= LEFT.x + LEFT.w && c.y + c.h <= LEFT.y + LEFT.h), 'the estate fits the left zone');
+  assert.equal(objStage.groups.reduce((n, c) => n + c.count, 0), 194, 'the group cards carry every resource');
+});
+
+test("object stage: the question's pod gets the close-up, and its three records are the ones the program reads", () => {
+  const vm = objProj.resources.find((r) => r.name === 'web-prod-03');
+  assert.ok(vm && vm.type === 'virtualMachine');
+  const nic = objProj.resources.find((r) => r.id === vm.nicId);
+  assert.ok(nic && nic.type === 'networkInterface' && nic.publicIpId);
+  const pipId = nic.publicIpId as string;
+  const idx = (id: string): number => objProj.resources.findIndex((r) => r.id === id);
+  assert.deepEqual(objStage.focus, { vm: idx(vm.id), nic: idx(nic.id), pip: idx(pipId) });
+  assert.deepEqual(
+    objStage.records.map((r) => [r.role, r.index]),
+    [['vm', objStage.focus.vm], ['nic', objStage.focus.nic], ['pip', objStage.focus.pip]]
+  );
+
+  const zoomed = objStage.glyphs.filter((g) => g.zoom);
+  assert.deepEqual(zoomed.map((g) => g.index).sort((a, b) => a - b), [...objStage.podIndexes].sort((a, b) => a - b));
+  assert.deepEqual(zoomed.map((g) => g.role).sort(), ['dataDisk', 'nic', 'osDisk', 'pip', 'vm']);
+  assert.equal(new Set(zoomed.map((g) => g.unitId)).size, 1, 'the close-up is of one pod');
+  assert.deepEqual(objStage.glyphs.flatMap((g) => (g.focus ? [g.focus] : [])).sort(), ['nic', 'pip', 'vm']);
+
+  // The picture and the run agree: the program touched exactly these three records, and its search stopped at the VM.
+  assert.deepEqual(objTrace.usedIndexes, [objStage.focus.pip, objStage.focus.nic, objStage.focus.vm].sort((a, b) => a - b));
+  assert.equal(objTrace.nameReadUpTo, objStage.focus.vm);
+  assert.equal(objTrace.nameReads, objStage.focus.vm + 1);
+  assert.equal(objTrace.idReads, 194);
+  assert.equal(objTrace.scanned, 194);
+
+  // The enlarged glyphs sit on the centre lines of the records they stand for, left of the object.
+  for (const r of objStage.records) {
+    const z = ZOOM[r.role];
+    assert.equal(z.cy, r.y + r.h / 2, `${r.role}: the close-up lines up with its record`);
+    assert.ok(z.cx + z.w / 2 < RIGHT.x && z.cx - z.w / 2 > LEFT.x);
+  }
+});
+
+test('object stage: the record cards show the real values, and mark the fields the run read or followed', () => {
+  for (const card of objStage.records) {
+    const real = objRecord(card.index);
+    assert.equal(card.name, real.name);
+    assert.equal(card.id, real.id);
+    for (const f of card.fields) {
+      const verbatim = JSON.stringify(real[f.key]);
+      const shortened = JSON.stringify(`\u2026/${String(real[f.key]).split('/').pop()}`);
+      assert.ok(f.value === verbatim || f.value === shortened, `${card.name}.${f.key} shows ${f.value}`);
+      if (f.kind === 'read') assert.equal(f.value, verbatim, `${card.name}.${f.key} is what the answer quotes, so it is not shortened`);
+      if (f.kind === 'ref' || f.kind === 'id') assert.equal(f.value, shortened, `${card.name}.${f.key} is an id, shown short`);
+    }
+    const marked = card.fields.filter((f) => f.kind === 'read' || f.kind === 'ref').map((f) => f.key).sort();
+    const read = objTrace.fieldsByIndex[card.index].filter((k) => k !== 'id' && k !== 'name').sort();
+    assert.deepEqual(marked, read, `${card.name}: the fields marked on the card are the fields the run read`);
+  }
+  const quoted = (role: string): string[] => objStage.records.find((r) => r.role === role)!.fields.filter((f) => f.kind === 'read').map((f) => f.value);
+  assert.deepEqual(quoted('vm'), [JSON.stringify(objTrace.result.powerState)]);
+  assert.deepEqual(quoted('pip'), [JSON.stringify(objTrace.result.publicIp)]);
+});
+
+test('object stage: refuses a question it cannot show', () => {
+  assert.throws(() => buildObjectStage(objInv, objProj, { vmName: 'no-such-vm' }), /No VM named/);
+  assert.throws(() => buildObjectStage(objInv, objProj, { vmName: 'web-prod-03-nic' }), /No VM named/, 'a NIC is not a VM');
+  assert.throws(() => buildObjectStage(objInv, objProj, { vmName: 'sql-host-01' }), /no public IP/);
+});
+
+test('choreography: every glyph is in its pod at the start and in its cell at the end, and the flights fit the flatten step', () => {
+  let lastLanding = 0;
+  for (const g of objStage.glyphs) {
+    assertPose(poseAt(g, 0), g.estate, `${g.name} at the start`);
+    assertPose(poseAt(g, LAST_STEP), g.cell, `${g.name} at the end`);
+    const [a, b] = flightWindow(g);
+    assert.ok(a >= AT.links && b <= AT.flatten, `${g.name}: flight ${a}..${b} sits inside the flatten step`);
+    lastLanding = Math.max(lastLanding, b);
+    if (g.zoom) {
+      assertPose(poseAt(g, AT.links), g.zoom, `${g.name} is fully enlarged when the flatten step begins`);
+      const after = poseAt(g, AT.links + 1e-6);
+      assert.ok(Math.hypot(after.cx - g.zoom.cx, after.cy - g.zoom.cy) < 0.01, `${g.name}: the hand-over from close-up to flight does not jump`);
+    } else {
+      for (const t of [0, 0.5, 1, 1.5, AT.links]) assertPose(poseAt(g, t), g.estate, `${g.name} waits in its pod until the flatten step (t=${t})`);
+    }
+  }
+  assert.ok(lastLanding < AT.flatten);
+  assert.equal(landedCount(objStage.glyphs, AT.links), 0);
+  assert.equal(landedCount(objStage.glyphs, AT.flatten), 194);
+  let before = 0;
+  for (const t of sweepOf(0, 10, 0.05)) {
+    const n = landedCount(objStage.glyphs, t);
+    assert.ok(n >= before, `the count of resources in data.resources only grows (t=${t})`);
+    before = n;
+  }
+  for (const g of objStage.glyphs) assert.ok(landed(g, 0) === 0 && landed(g, 10) === 1);
+  assert.equal(contractOpacity(lastLanding), 0, 'the description arrives after the last resource has landed');
+});
+
+test('choreography: the flights pour in through the gate, level with the array, and never cross the headings', () => {
+  assert.ok(GATE.x < RIGHT.x && GATE.y > OBJ.resourcesLabelY && GATE.y < OBJ.recordsY, 'the gate is just outside the card, level with the array');
+  for (const g of objStage.glyphs) {
+    const [a, b] = flightWindow(g);
+    let closest = Infinity;
+    for (let k = 0; k <= 1500; k++) {
+      const p = poseAt(g, a + ((b - a) * k) / 1500);
+      closest = Math.min(closest, Math.hypot(p.cx - GATE.x, p.cy - GATE.y));
+      if (p.cx - p.w / 2 >= RIGHT.x) {
+        assert.ok(p.cy - p.h / 2 > OBJ.resourcesLabelY, `${g.name}: inside the object it stays below the subscriptions, groups and the array's label (top at ${(p.cy - p.h / 2).toFixed(1)})`);
+      }
+    }
+    assert.ok(closest < 4, `${g.name} passes through the gate (closest ${closest.toFixed(1)})`);
+  }
+});
+
+test("choreography: the estate's headings fly into the object and have landed before the glyphs set off", () => {
+  const chips = objStage.chips;
+  assert.deepEqual(chips.map((c) => c.kind), ['subscription', 'subscription', 'group', 'group', 'group', 'group', 'group', 'group']);
+  const headingsBottom = OBJ.groupsChipY + 2 * OBJ.chipH + 6;
+  for (const c of chips) {
+    assert.deepEqual(chipRect(c, 0), c.fromRect);
+    const end = chipRect(c, AT.containers);
+    for (const k of ['x', 'y', 'w', 'h'] as const) assert.ok(near(end[k], c.toRect[k]), `${c.label}: lands on its slot (${k})`);
+    assert.equal(chipProgress(c, AT.containers), 1);
+    assert.ok(c.toRect.x >= RIGHT.x && c.toRect.x + c.toRect.w <= RIGHT.x + RIGHT.w, `${c.label}: its slot is inside the object's card`);
+    assert.ok(c.toRect.y + c.toRect.h <= headingsBottom && headingsBottom < OBJ.resourcesLabelY - 12, `${c.label}: its slot is above the array`);
+  }
+  chips.forEach((a, i) =>
+    chips.slice(i + 1).forEach((b) => {
+      const apart = a.toRect.x + a.toRect.w <= b.toRect.x || b.toRect.x + b.toRect.w <= a.toRect.x || a.toRect.y + a.toRect.h <= b.toRect.y || b.toRect.y + b.toRect.h <= a.toRect.y;
+      assert.ok(apart, `${a.label} and ${b.label} have their own slots`);
+    })
+  );
+  // What changes on the way: a group's count becomes its location, a subscription gains its (short) id.
+  for (const c of chips.filter((x) => x.kind === 'subscription')) {
+    const sub = objProj.subscriptions.find((s) => s.name === c.label)!;
+    assert.equal(c.to.side, shortSubId(sub.id));
+  }
+  for (const c of chips.filter((x) => x.kind === 'group')) {
+    const group = objProj.resourceGroups.find((g) => g.name === c.label)!;
+    assert.equal(c.to.side, group.location);
+    assert.equal(c.from.side, String(objProj.resources.filter((r) => r.resourceGroup === c.label).length));
+  }
+  assert.equal(shortSubId('sub-7f3a9c20-prod'), 'sub-7f3a\u2026prod');
+  assert.equal(shortSubId('plain'), 'plain');
+});
+
+test('choreography: the layers hand the left half from the estate to the description to the program', () => {
+  for (const t of sweepOf(0, 10, 0.05)) {
+    const layers = {
+      estate: estateOpacity(t),
+      closeUp: closeUpOpacity(t),
+      records: recordsOpacity(t),
+      fields: recordFieldsOpacity(t),
+      contract: contractOpacity(t),
+      program: programOpacity(t),
+      result: resultOpacity(t),
+      nicLink: linkDraw('nic', t),
+      pipLink: linkDraw('pip', t)
+    };
+    for (const [name, v] of Object.entries(layers)) assert.ok(v >= 0 && v <= 1, `${name} at t=${t} is ${v}`);
+    assert.ok(layers.nicLink >= layers.pipLink, 'the NIC bracket is drawn before the public-IP one');
+  }
+  assert.equal(estateOpacity(0), 1);
+  assert.ok(estateOpacity(AT.contract) < 0.001, 'the estate has gone when the description arrives');
+  assert.equal(closeUpOpacity(0), 0);
+  assert.ok(closeUpOpacity(AT.links) > 0.99);
+  assert.equal(closeUpOpacity(AT.flatten), 0, 'the close-up has gone when the flatten step is done');
+  assert.equal(recordsOpacity(0), 0);
+  assert.equal(recordsOpacity(AT.links), 1);
+  assert.ok(contractOpacity(AT.contract) > 0.99 && contractOpacity(AT.program) === 0);
+  assert.ok(programOpacity(AT.contract) === 0 && programOpacity(AT.program) === 1);
+  assert.ok(resultOpacity(AT.ip) === 0 && resultOpacity(AT.return) === 1);
+  const lines = objCode.split('\n').length;
+  for (let i = 0; i < lines; i++) assert.ok(programLineOpacity(i, AT.program + 0.05) > 0.999, `line ${i + 1} is up before the first sweep starts`);
+});
+
+test('choreography: the sweeps count what the run really read, and a reached marker never falls', () => {
+  assert.equal(indexSweep(objTrace.idReads, AT.contract), 0);
+  assert.equal(indexSweep(objTrace.idReads, AT.index), objTrace.idReads);
+  assert.equal(findSweep(objTrace.nameReadUpTo, AT.index), 0);
+  assert.equal(findSweep(objTrace.nameReadUpTo, AT.find), objTrace.nameReads);
+  let ids = 0;
+  let names = 0;
+  for (const t of sweepOf(4, 8, 0.02)) {
+    const i = indexSweep(objTrace.idReads, t);
+    const n = findSweep(objTrace.nameReadUpTo, t);
+    assert.ok(i >= ids && n >= names, `the sweeps only grow (t=${t})`);
+    ids = i;
+    names = n;
+  }
+  for (const step of [AT.find, AT.nic, AT.ip, AT.return]) {
+    assert.equal(reach(step, step - 1), 0, `step ${step} has not been reached before it starts`);
+    assert.equal(reach(step, step), 1, `step ${step} has been reached when it ends`);
+    let before = 0;
+    for (const t of sweepOf(step - 1, 10, 0.05)) {
+      const v = reach(step, t);
+      assert.ok(v >= before, `reach(${step}) never falls (t=${t})`);
+      before = v;
+    }
+  }
+  assert.ok(ease(0) === 0 && ease(1) === 1 && near(ease(0.5), 0.5));
+  assert.ok(seg(0.5, 0, 1) === 0.5 && seg(-1, 0, 1) === 0 && seg(2, 0, 1) === 1);
+  const mid = mixPose({ cx: 0, cy: 0, w: 10, h: 10, r: 0 }, { cx: 10, cy: 20, w: 20, h: 30, r: 4 }, 0.5);
+  assert.deepEqual(mid, { cx: 5, cy: 10, w: 15, h: 20, r: 2 });
+});
+
+test('steps and acts: eleven steps in three acts, and each act starts where its first step does', () => {
+  assert.equal(STEP_IDS.length, 11);
+  assert.equal(new Set(STEP_IDS).size, 11);
+  assert.equal(LAST_STEP, 10);
+  STEP_IDS.forEach((id, i) => assert.equal(AT[id], i));
+  assert.deepEqual(
+    STEP_IDS.map((_, i) => actOf(i)),
+    ['reshape', 'reshape', 'reshape', 'reshape', 'describe', 'read', 'read', 'read', 'read', 'read', 'read']
+  );
+  assert.deepEqual(ACTS.map((a) => a.first), [0, 4, 5]);
+  for (const a of ACTS) assert.equal(actOf(a.first), a.id);
+});
+
+test('trace: the reference program is run for real, and the screen quotes what it did', () => {
+  const real = runTracked({ code: objCode, projection: objProj });
+  assert.equal(real.status, 'ok');
+  assert.equal(objTrace.resultText, real.resultText);
+  assert.equal(objTrace.backTokens, backToModelTokens(real), 'the same audited figure the code screen shows');
+  assert.equal(objTrace.scanned, real.totals.resourcesScanned);
+  assert.equal(objTrace.propertyReads, real.totals.propertyReads);
+
+  // The answer is the inventory's own, not a copy of it.
+  const vm = objInv.resources.find((r) => r.name === 'web-prod-03');
+  assert.ok(vm && vm.type === 'virtualMachine');
+  const nic = objInv.resources.find((r) => r.id === vm.nicId);
+  assert.ok(nic && nic.type === 'networkInterface');
+  const pip = objInv.resources.find((r) => r.id === nic.publicIpId);
+  assert.ok(pip && pip.type === 'publicIp');
+  assert.deepEqual(objTrace.result, { powerState: vm.powerState, publicIp: pip.ipAddress });
+  assert.ok(objTrace.backTokens > 0 && objTrace.backTokens < 100, 'what goes back is a couple of values, not the estate');
+
+  assert.throws(() => traceAccess('function main(data) { throw new Error("nope"); }', objProj), /did not run/);
+});
+
+test('blocks: each access step lights the lines that do its work, found by what they say', () => {
+  const lines = objCode.split('\n');
+  assert.ok(lines.length <= PROGRAM_MAX_LINES, `the program has ${lines.length} lines and the panel holds ${PROGRAM_MAX_LINES}`);
+  const b = programBlocks(objCode);
+  assert.match(lines[b.index[1]], /new Map\(/);
+  assert.match(lines[b.find[1]], /\.find\(/);
+  assert.match(lines[b.find[1]], /web-prod-03/);
+  assert.match(lines[b.nic[1]], /vm\.nicId/);
+  assert.match(lines[b.ip[1]], /publicIpId/);
+  assert.match(lines[b.ret[0]], /^\s*(\/\/|return)/);
+  assert.match(lines[b.ret[1]], /^\s*\};?\s*$/);
+  const ordered = [b.index, b.find, b.nic, b.ip, b.ret];
+  ordered.forEach(([first, last], i) => {
+    assert.ok(first <= last);
+    if (i > 0) assert.ok(ordered[i - 1][1] < first, 'the blocks run in order and do not overlap');
+  });
+  assert.ok(b.index[0] < b.index[1] && lines[b.index[0]].trim().startsWith('//'), 'the comment above a step belongs to it');
+
+  // The highlight follows the code; a line that has gone is an error, not a wrong highlight.
+  const moved = programBlocks(`// header\n${objCode}`);
+  assert.deepEqual(moved.find, [b.find[0] + 1, b.find[1] + 1]);
+  assert.deepEqual(moved.ret, [b.ret[0] + 1, b.ret[1] + 1]);
+  assert.throws(() => programBlocks(objCode.replace('new Map(', 'new Set(')), /exactly one "index by id" line .* found 0/);
+  assert.throws(() => programBlocks(objCode.replace('const vm =', 'const other = data.resources.find((r) => r.id === 1);\n  const vm =')), /exactly one "find by name" line .* found 2/);
+});
+
+test('tokenizer: runs join back to the line, and strings, keywords, numbers and comments are told apart', () => {
+  for (const line of objCode.split('\n')) assert.equal(tokenizeLine(line).map((t) => t.text).join(''), line, `line: ${line}`);
+  assert.deepEqual(tokenizeLine("const n = 3; // x 'y' 4"), [
+    { text: 'const', cls: 'keyword' },
+    { text: ' n = ', cls: 'plain' },
+    { text: '3', cls: 'number' },
+    { text: '; ', cls: 'plain' },
+    { text: "// x 'y' 4", cls: 'comment' }
+  ]);
+  assert.deepEqual(tokenizeLine("'a//b'"), [{ text: "'a//b'", cls: 'string' }], 'a // inside a string is not a comment');
+  assert.deepEqual(tokenizeLine(''), []);
+  assert.deepEqual(tokenizeLine("r.name === 'web-prod-03'").map((t) => t.cls), ['plain', 'string'], 'a number inside a string stays in the string');
+});
+
+test('contract: the excerpt is cut from the tool description the model really gets', () => {
+  const ex = contractExcerpt(SCHEMA_DOC);
+  assert.ok(CODE_TOOLS[0].function.description.includes(SCHEMA_DOC), 'the excerpt quotes the real description');
+  assert.equal(ex.shape[0], 'type Projection = {');
+  assert.equal(ex.shape[ex.shape.length - 1], '};');
+  for (const key of ['generatedAt', 'subscriptions', 'resourceGroups', 'resources']) assert.ok(ex.shape.some((l) => l.includes(`${key}:`)), `the shape names ${key}`);
+  assert.match(ex.references.join(' '), /References are by id: a VM's nicId identifies a networkInterface/);
+  for (const l of [...ex.shape, ...ex.references]) assert.ok(SCHEMA_DOC.includes(l.trim()), `quoted verbatim: ${l}`);
+
+  const shown = shapeForDisplay(ex.shape);
+  assert.equal(shown.length, ex.shape.length);
+  assert.deepEqual(shown.flatMap((l) => (l.note ? [l.note] : [])), ['ALL resources, flat.'], 'only the note that teaches something is kept');
+  assert.ok(shown.every((l) => !l.code.includes('//')));
+
+  assert.throws(() => contractExcerpt('// nothing to see here'), /no `type Projection` block/);
+  assert.throws(() => contractExcerpt(SCHEMA_DOC.replace('// References are by id', '// Things are by id')), /does not explain references/);
+});
+
+test('copy: every step has narration, and its numbers come from the run', () => {
+  for (const id of STEP_IDS) {
+    const c = stepCopy(id, objFacts);
+    assert.ok(c.label.length > 0 && c.text.length > 20, `${id} has a label and a sentence`);
+    assert.ok(!/undefined|NaN|\[object/.test(c.text), `${id}: ${c.text}`);
+  }
+  const text = (id: StepId, over: Partial<CopyFacts> = {}): string => stepCopy(id, { ...objFacts, ...over }).text;
+  assert.match(text('estate'), /all 194 resources/);
+  assert.match(text('containers'), /2 subscriptions and 6 resource groups/);
+  assert.match(text('links'), /web-prod-03 does not contain its NIC/);
+  assert.match(text('index'), /194 records read/);
+  assert.match(text('find'), /15 names/);
+  assert.match(text('find'), /resources\[14\]/);
+  assert.match(text('return'), /2 values, \u2248 40 tokens/);
+  // Change the run and the words change with it.
+  const other = { ...objTrace, idReads: 7, nameReads: 3, nameReadUpTo: 2, backTokens: 1234, result: { a: 1, b: 2, c: 3 } };
+  assert.match(text('index', { trace: other }), /7 records read/);
+  assert.match(text('find', { trace: other }), /3 names.*resources\[2\]/);
+  assert.match(text('return', { trace: other }), /3 values, \u2248 1,234 tokens/);
 });
