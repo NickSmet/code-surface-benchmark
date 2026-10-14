@@ -1,0 +1,206 @@
+/*
+ * Shared styles for the interactive tour (/tour/*).
+ * Everything is prefixed `t-` / `tour-` so nothing leaks into the benchmark UI.
+ * Sizing is deliberately generous: these screens are meant to be shown on a
+ * projector, so body text is >= 14px and key numbers are large.
+ */
+
+.tour {
+  --t-radius: 14px;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-page-bg);
+  color: var(--color-text-primary);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.tour-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 18px 28px 28px;
+  gap: 16px;
+}
+
+/* ── headings ─────────────────────────────────────────────────────── */
+.t-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.t-h1 {
+  margin: 2px 0 0;
+  font-size: 30px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.t-lead {
+  margin: 6px 0 0;
+  max-width: 78ch;
+  font-size: 16px;
+  color: var(--color-text-muted);
+}
+.t-h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* ── surfaces ─────────────────────────────────────────────────────── */
+.t-panel {
+  background: var(--color-panel-bg);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--t-radius);
+  min-width: 0;
+}
+.t-panel-pad {
+  padding: 16px 18px;
+}
+.t-scroll {
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ── controls ─────────────────────────────────────────────────────── */
+.t-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--color-border-strong);
+  background: white;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.06s;
+}
+.t-btn:hover:not(:disabled) {
+  background: var(--color-hover-bg);
+  border-color: var(--color-text-dim);
+}
+.t-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.t-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.t-btn.primary {
+  background: var(--color-brand);
+  border-color: var(--color-brand);
+  color: white;
+}
+.t-btn.primary:hover:not(:disabled) {
+  background: var(--color-brand-dark);
+  border-color: var(--color-brand-dark);
+}
+.t-btn.good {
+  background: var(--good);
+  border-color: var(--good);
+  color: white;
+}
+.t-btn.good:hover:not(:disabled) {
+  background: #047857;
+  border-color: #047857;
+}
+.t-btn.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.t-btn.sm {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.t-btn.icon {
+  padding: 8px;
+}
+
+.t-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-default);
+  background: white;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.t-callout {
+  border-left: 3px solid var(--accent, var(--color-brand));
+  background: var(--accent-bg, var(--color-brand-bg));
+  border-radius: 0 10px 10px 0;
+  padding: 10px 14px;
+  font-size: 14.5px;
+  color: var(--color-text-secondary);
+}
+.t-callout strong {
+  color: var(--color-text-primary);
+}
+
+.t-mono {
+  font-family: var(--font-mono);
+}
+.t-muted {
+  color: var(--color-text-muted);
+}
+
+pre.t-code {
+  margin: 0;
+  padding: 12px 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+pre.t-json {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--color-expanded-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 9px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.t-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .tour-main {
+    padding: 14px 16px 24px;
+  }
+  .t-h1 {
+    font-size: 24px;
+  }
+}

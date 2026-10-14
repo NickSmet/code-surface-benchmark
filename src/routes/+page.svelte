@@ -145,6 +145,7 @@
     <div class="title-block">
       <div class="title">Tool Catalog vs Code Surface</div>
       <div class="subtitle">Same model, same task, same data — two surfaces, side by side.</div>
+      <a class="tour-link" href="/tour" title="An interactive walk-through: the estate, naive tools, a query language, then code">New here? Take the guided tour →</a>
     </div>
 
     <div class="task-pills">
