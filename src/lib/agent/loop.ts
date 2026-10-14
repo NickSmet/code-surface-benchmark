@@ -11,13 +11,12 @@
  */
 
 import type { ProviderClient, ProviderMessage } from './providers/types';
+import { MAX_ITERATIONS } from './limits';
 import { costUsd, priceFor } from './pricing';
 import { emptyMetrics, type ApprovalDecision, type BenchEvent, type RunMetrics, type SurfaceId } from './sse-protocol';
 import { diffProjection, type ChangeRow } from '$lib/inventory/projection';
 import type { Surface } from '$lib/surfaces/types';
 import { previewArgs } from '$lib/surfaces/types';
-
-const MAX_ITERATIONS = 16;
 
 export interface RunBenchArgs {
   provider: ProviderClient;
