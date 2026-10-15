@@ -51,6 +51,8 @@ For a walk-through with no model involved, open `/tour`. Seven screens, each its
 
 To give it as a talk, press `P` (or open any screen with `?mode=present`): the step bar becomes a four-pixel rail along the top, Back and Next go, and the stage takes the room they took. `→` and `←` step through all 66 beats and cross from one screen to the next, `⌥←` and `⌥→` jump a screen, and `H` lists the keys.
 
+For a ninety-minute workshop, open `/workshop`: the same seven screens with a welcome, a **Your turn** screen (change a filter, a field and a rule, predicting each result before it runs) and a wrap, so ten screens and 78 beats. The rail along the top is drawn to the plan's minutes, seventy for the talk and twenty for questions, and `docs/workshop-script.md` is the script for it, beat by beat, with the pacing, the cuts and the questions to expect. Nothing in it calls a model.
+
 Tool outputs come from the real handlers and the bill uses the benchmark's own accounting: an estimate of one token per four characters, split on every screen into what the model reads (text it already read on the turn before, called cached, plus new text) and what it writes. Every token is counted at full price, so the totals are tokens, not dollars; a provider with prompt caching would bill the cached part at roughly a tenth. The call sequences are scripted, so screens 1 to 6 show the shape of each approach, not a measurement. Screen 7 is the exception: its figures are measured runs, and its dollars are estimates from the tokens the provider reported, not an invoice.
 
 [Try it locally](#try-it) · [Read example programs](docs/solution-path-examples.md) · [Run benchmarks](#running-benchmarks) · [Comparison scope](#what-this-comparison-tells-you)

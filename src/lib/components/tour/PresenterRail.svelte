@@ -1,15 +1,29 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { Keyboard, LogOut } from '@lucide/svelte';
+  import ScreenMark from './ScreenMark.svelte';
   import { usePresenter } from '$lib/tour/presenter.svelte';
-  import { SCREENS, screenIndexOf } from '$lib/tour/screens';
+  import { screenIndexOf } from '$lib/tour/screens';
+  import { blockOf, minutesOf, rangeOf } from '$lib/tour/workshop';
 
   const presenter = usePresenter();
-  const here = $derived(screenIndexOf(page.url.pathname));
+  const screens = $derived(presenter.screens);
+  const workshop = $derived(presenter.format === 'workshop');
+  const here = $derived(screenIndexOf(page.url.pathname, screens));
   /** How far through the screen on show the talk is; the rail fills its segment with it. */
   const fill = $derived(presenter.beat && presenter.beat.count > 0 ? Math.min(1, (presenter.beat.at + 1) / presenter.beat.count) : 0);
-  const current = $derived(SCREENS[here] ?? null);
+  const current = $derived(screens[here] ?? null);
   const shown = $derived(presenter.pop !== null);
+  /** In the workshop a segment is as long as its screen's share of the ninety minutes, so the rail is the agenda, drawn to scale. */
+  const weight = (id: string): number => {
+    const b = workshop ? blockOf(id) : null;
+    return b ? minutesOf(b) : 1;
+  };
+  const note = $derived.by(() => {
+    if (!current) return '';
+    const b = workshop ? blockOf(current.id) : null;
+    return `${current.title}: ${current.hint}${b ? ` \u00b7 ${rangeOf(b)}` : ''}`;
+  });
 </script>
 
 <!--
@@ -24,12 +38,12 @@
     role="progressbar"
     aria-label="Where the talk is"
     aria-valuemin={0}
-    aria-valuemax={SCREENS.length}
+    aria-valuemax={screens.length}
     aria-valuenow={Math.round((Math.max(here, 0) + fill) * 100) / 100}
-    aria-valuetext={current ? `${current.title}, screen ${here + 1} of ${SCREENS.length}` : undefined}
+    aria-valuetext={current ? `${current.title}, screen ${here + 1} of ${screens.length}` : undefined}
   >
-    {#each SCREENS as s, i (s.id)}
-      <span class="seg" class:now={i === here}>
+    {#each screens as s, i (s.id)}
+      <span class="seg" class:now={i === here} style:flex-grow={weight(s.id)}>
         <span class="fill" style:transform="scaleX({i < here ? 1 : i === here ? fill : 0})"></span>
       </span>
     {/each}
@@ -37,18 +51,18 @@
 
   <div class="pop">
     <nav aria-label="Tour steps">
-      <ol class="steps">
-        {#each SCREENS as s, i (s.id)}
+      <ol class="steps" class:many={screens.length > 8}>
+        {#each screens as s, i (s.id)}
           <li class:done={i < here} class:now={i === here}>
             <a href={s.href} title={s.hint} aria-current={i === here ? 'step' : undefined}>
-              <span class="num">{i + 1}</span>
+              <span class="num"><ScreenMark screen={s} size={14} /></span>
               <span class="title">{s.title}</span>
             </a>
           </li>
         {/each}
       </ol>
     </nav>
-    <p class="note" aria-live="polite">{presenter.pop?.note ?? (current ? `${current.title}: ${current.hint}` : '')}</p>
+    <p class="note" aria-live="polite">{presenter.pop?.note ?? note}</p>
     <div class="acts">
       <button type="button" onclick={() => (presenter.helpOpen = true)}><Keyboard size={14} />Keys <kbd>H</kbd></button>
       <button type="button" onclick={() => presenter.toggle()}><LogOut size={14} />Leave presenter mode <kbd>P</kbd></button>
@@ -238,7 +252,8 @@
     color: var(--color-text-muted);
   }
 
-  /* Seven titles in a row need about 1000px; narrower than that, only the screen the talk is on keeps its title. */
+  /* Seven titles in a row need about 1000px of viewport, ten about 1600 (the card is 1569px wide with them, and keeps 16px to each edge);
+     narrower than that, only the screen the talk is on keeps its title. Each breakpoint keeps about 40px to spare for other fonts. */
   @media (max-width: 1100px) {
     .steps li:not(.now) .title {
       display: none;
@@ -247,6 +262,17 @@
       padding-right: 6px;
     }
     .now a {
+      padding-right: 14px;
+    }
+  }
+  @media (max-width: 1640px) {
+    .steps.many li:not(.now) .title {
+      display: none;
+    }
+    .many a {
+      padding-right: 6px;
+    }
+    .many .now a {
       padding-right: 14px;
     }
   }

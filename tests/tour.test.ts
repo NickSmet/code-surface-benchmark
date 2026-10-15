@@ -49,7 +49,29 @@ import {
   type RungId
 } from '../src/lib/tour/language';
 import { ORIGIN, buildStrains, strainLink, withOrigin } from '../src/lib/tour/strains';
-import { SCREENS, crossTo, screenIndexOf } from '../src/lib/tour/screens';
+import { SCREENS, WORKSHOP_ONLY, WORKSHOP_SCREENS, crossTo, isWorkshopPath, screenIndexOf, screensOf } from '../src/lib/tour/screens';
+import { FORMAT_COOKIE, formatOf, parseFormat } from '../src/lib/tour/format';
+import {
+  BLOCKS,
+  HOW,
+  OUTCOMES,
+  PLAN_SCREENS,
+  QUESTIONS_FROM,
+  QUESTION_MINUTES,
+  TOTAL_MINUTES,
+  WELCOME_BEATS,
+  WORKSHOP_IDS,
+  WRAP_BEATS,
+  blockOf,
+  minutesOf,
+  panelBeats,
+  parseAt,
+  rangeOf,
+  type Block
+} from '../src/lib/tour/workshop';
+import { LENS_ORDER } from '../src/lib/tour/lenses';
+import { EXERCISE_IDS, compact, exercisesOf, fieldsPerRow, groupsOf, parseTurn, sameAnswer, swap, turnBeats, turnHref, type Exercise } from '../src/lib/tour/turn';
+import { ASKS, SEEDS, TAKEAWAY, recapOf } from '../src/lib/tour/wrap';
 import { beatActionFor, globalActionFor, moveFor, typingIn, type BeatAction } from '../src/lib/tour/beat-keys';
 import { modeOf, parseMode } from '../src/lib/tour/mode';
 import { QUERY_KEYS, buildBeats, buildStages, describeQuery, pickFields, shortIds, showArgs, solvedRows } from '../src/lib/tour/strain-stage';
@@ -2424,12 +2446,13 @@ test('results: every row is a bar for the cell it names, and one row on each pan
   }
 });
 
-test('the stepper lists the seven screens, every screen it names is a page, and every page links only to pages', () => {
+test('the tour is seven screens and the workshop ten, every screen either names is a page, and every page links only to pages', () => {
   const routes = new URL('../src/routes/tour/', import.meta.url);
   const pages = readdirSync(routes, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(new URL(`${d.name}/+page.svelte`, routes))).map((d) => `/tour/${d.name}`);
   const steps = SCREENS.map((s) => s.href);
   assert.deepEqual(steps, ['/tour/estate', '/tour/tools', '/tour/strains', '/tour/language', '/tour/object', '/tour/code', '/tour/results']);
-  assert.deepEqual([...pages].sort(), [...steps].sort(), 'no page is missing from the stepper, and no step is missing a page');
+  const workshop = WORKSHOP_SCREENS.map((s) => s.href);
+  assert.deepEqual([...pages].sort(), [...workshop].sort(), 'no page is missing from the workshop, and no workshop step is missing a page');
   for (const d of pages) {
     const src = readFileSync(new URL(`../src${d.replace('/tour', '/routes/tour')}/+page.svelte`, import.meta.url), 'utf8');
     for (const m of src.matchAll(/href: '(\/tour\/[a-z]+)[?']/g)) assert.ok(pages.includes(m[1]), `${d} links to ${m[1]}`);
@@ -2582,7 +2605,7 @@ test('presenter mode: a link\u2019s own say-so comes first, then what was rememb
 });
 
 test('presenter mode: every screen takes part in the keys, and hides its Back and Next row under one class', () => {
-  for (const s of SCREENS) {
+  for (const s of WORKSHOP_SCREENS) {
     const src = readFileSync(new URL(`../src/routes/tour/${s.id}/+page.svelte`, import.meta.url), 'utf8');
     assert.ok(src.includes('<BeatNav') || src.includes('<BeatKeys'), `${s.id} has no step keys and does not tell the rail how far along it is`);
     if (src.includes('<BeatNav')) assert.match(src, /<div class="nav">\s*<BeatNav/, `${s.id}: the BeatNav row must be .nav, the one class presenter mode hides`);
@@ -2609,4 +2632,599 @@ test('examples: each beat names its example as its group, so Shift and an arrow 
   const tagStep = beats.findIndex((b) => b.id === 'tag' && b.step === 2);
   assert.deepEqual(moveFor('group-next', tagStep, groups), { to: beats.findIndex((b) => b.id === 'disks' && b.step === 0) });
   assert.deepEqual(moveFor('group-back', tagStep, groups), { to: beats.findIndex((b) => b.id === 'tag' && b.step === 0) });
+});
+
+// ── the workshop ─────────────────────────────────────────────────────────────
+
+const text = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const at = (href: string) => new URL(href, 'http://workshop.test');
+
+test('workshop: the seven keep their numbers and their order, three screens go around them, and the three take no number', () => {
+  assert.deepEqual(WORKSHOP_SCREENS.map((s) => s.id), ['welcome', 'estate', 'tools', 'strains', 'language', 'object', 'code', 'turn', 'results', 'wrap']);
+  assert.deepEqual(WORKSHOP_SCREENS.filter((s) => s.n !== undefined).map((s) => s.n), [1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(WORKSHOP_SCREENS.filter((s) => s.n === undefined).map((s) => s.id), [...WORKSHOP_ONLY]);
+  assert.ok(WORKSHOP_SCREENS.every((s) => (s.n === undefined) === (s.mark !== undefined)), 'a screen without a number has a mark to draw in its place');
+  assert.equal(screensOf('tour'), SCREENS);
+  assert.equal(screensOf('workshop'), WORKSHOP_SCREENS);
+  assert.ok(!SCREENS.some((s) => WORKSHOP_ONLY.includes(s.id)), 'the tour does not have them');
+});
+
+test('workshop: only the three screens the tour does not have put a visitor in the workshop', () => {
+  for (const id of WORKSHOP_ONLY) {
+    assert.equal(isWorkshopPath(`/tour/${id}`), true, id);
+    assert.equal(isWorkshopPath(`/tour/${id}/`), true, id);
+  }
+  for (const s of SCREENS) assert.equal(isWorkshopPath(s.href), false, `${s.id} is in both`);
+  assert.equal(isWorkshopPath('/tour/welcomed'), false, 'a path that only starts like a screen is not that screen');
+  assert.equal(isWorkshopPath('/tour'), false);
+  assert.equal(isWorkshopPath('/'), false);
+});
+
+test('workshop: the screen before and the one after come from the list the visitor walks', () => {
+  const turn = WORKSHOP_SCREENS.find((s) => s.id === 'turn')!;
+  assert.deepEqual(crossTo('/tour/code', 1, WORKSHOP_SCREENS), { screen: turn, href: '/tour/turn' });
+  assert.equal(crossTo('/tour/code', 1)?.screen.id, 'results', 'the tour goes from the code surface straight to the results');
+  assert.deepEqual(crossTo('/tour/results', -1, WORKSHOP_SCREENS), { screen: turn, href: turn.end }, 'back from the results is the last of the exercises');
+  assert.equal(crossTo('/tour/estate', -1, WORKSHOP_SCREENS)?.screen.id, 'welcome');
+  assert.equal(crossTo('/tour/welcome', -1, WORKSHOP_SCREENS), null, 'the workshop starts at the welcome');
+  assert.equal(crossTo('/tour/wrap', 1, WORKSHOP_SCREENS), null, 'and ends with the questions');
+  assert.equal(screenIndexOf('/tour/welcome'), -1, 'the tour has no welcome');
+  assert.equal(screenIndexOf('/tour/welcome', WORKSHOP_SCREENS), 0);
+  assert.equal(screenIndexOf('/tour/code', WORKSHOP_SCREENS), 6);
+});
+
+test('workshop: the address each new screen is entered at from behind is its real last beat', () => {
+  const end = (id: string) => at(WORKSHOP_SCREENS.find((s) => s.id === id)!.end);
+  assert.equal(Number(end('welcome').searchParams.get('at')), WELCOME_BEATS.length - 1);
+  assert.equal(end('welcome').href, at(WELCOME_BEATS.at(-1)!.href).href);
+  assert.equal(Number(end('wrap').searchParams.get('at')), WRAP_BEATS.length - 1);
+  assert.equal(end('wrap').href, at(WRAP_BEATS.at(-1)!.href).href);
+  const beats = turnBeats({ filter: 'A filter', field: 'A field', rule: 'A rule' });
+  assert.equal(end('turn').href, at(beats.at(-1)!.href).href);
+  assert.deepEqual(parseTurn(end('turn').searchParams), { id: 'rule', step: 1 });
+});
+
+test('workshop format: a link\u2019s own say-so comes first, then what was remembered, and the tour when neither says', () => {
+  assert.equal(parseFormat('workshop'), 'workshop');
+  assert.equal(parseFormat('tour'), 'tour');
+  assert.equal(parseFormat('WORKSHOP'), null);
+  assert.equal(parseFormat(''), null);
+  assert.equal(parseFormat(null), null);
+  assert.equal(formatOf(null, null), 'tour');
+  assert.equal(formatOf(null, 'workshop'), 'workshop');
+  assert.equal(formatOf('tour', 'workshop'), 'tour', 'a link can turn it off');
+  assert.equal(formatOf('workshop', 'tour'), 'workshop', 'and on');
+  assert.equal(formatOf('nonsense', 'workshop'), 'workshop', 'what is not a format is not said');
+  assert.equal(formatOf(undefined, 'nonsense'), 'tour');
+  assert.equal(FORMAT_COOKIE, 'tour-format');
+});
+
+test('workshop: /workshop opens the welcome, presented, in the workshop format', () => {
+  const route = text('src/routes/workshop/+page.ts');
+  const target = route.match(/redirect\(307, '([^']+)'\)/)?.[1];
+  assert.ok(target, 'the route redirects');
+  const url = at(target!);
+  assert.equal(url.pathname, '/tour/welcome');
+  assert.equal(parseMode(url.searchParams.get('mode')), 'present');
+  assert.equal(parseFormat(url.searchParams.get('format')), 'workshop');
+  assert.equal(isWorkshopPath(url.pathname), true);
+});
+
+test('the plan: ninety minutes from the first screen to the last, the last twenty for questions, in the order the workshop walks', () => {
+  assert.deepEqual(PLAN_SCREENS, WORKSHOP_IDS);
+  let minute = 0;
+  for (const b of BLOCKS) {
+    assert.equal(b.from, minute, `${b.screen} starts where the one before ends`);
+    assert.ok(minutesOf(b) > 0, `${b.screen} has time`);
+    minute = b.to;
+  }
+  assert.equal(minute, TOTAL_MINUTES);
+  assert.equal(BLOCKS.reduce((n, b) => n + minutesOf(b), 0), TOTAL_MINUTES);
+  assert.equal(TOTAL_MINUTES, 90);
+  assert.equal(QUESTION_MINUTES, 20);
+  assert.equal(QUESTIONS_FROM, 70);
+  assert.deepEqual(BLOCKS.filter((b) => b.to > QUESTIONS_FROM).map((b) => b.screen), ['wrap'], 'the questions are on the last screen alone');
+  assert.equal(BLOCKS.at(-1)!.to - QUESTIONS_FROM, QUESTION_MINUTES);
+  assert.equal(rangeOf(blockOf('tools')!), '9\u201321 min');
+  assert.equal(blockOf('nowhere'), null);
+  assert.ok(BLOCKS.every((b) => b.gist.length > 0 && b.title.length > 0));
+});
+
+test('the plan: what the room is asked, and the numbers the agenda quotes, are the ones the screens show', () => {
+  const inv = buildInventory();
+  const n = inv.resources.length;
+  assert.equal(n, 194);
+  assert.match(blockOf('estate')!.gist, new RegExp(`^${n} resources, wired together\\. One question needs ${needleFor('granular-read', inv).resourceIds.size} of them\\.$`));
+  assert.match(blockOf('estate')!.ask!, new RegExp(`How many of the ${n} records`));
+  const tools = replayCatalog({ task: 'granular-read' });
+  assert.match(blockOf('tools')!.ask!, new RegExp(`The answer is ${tools.turns.at(-1)!.completionTokens} tokens\\.`));
+  assert.match(blockOf('language')!.ask!, new RegExp(`^Four questions nobody planned for`));
+  assert.equal(FRESH_QUESTIONS.length, 4);
+  assert.match(blockOf('object')!.ask!, new RegExp(`reads all ${n} records`));
+  assert.equal(run(programs['filter-aggregate'].code).totals.resourcesScanned, n, 'the program does read every record');
+  assert.equal(EXAMPLES.filter((e) => e.kind === 'fresh').length, 2, 'two questions nobody planned for on the code screen');
+  assert.match(blockOf('code')!.gist, /two questions nobody planned for/);
+  assert.match(blockOf('results')!.gist, /^Three models, six methods, 80 runs each/);
+  assert.equal(MODELS.length, 3);
+  assert.equal(METHODS.length, 6);
+  assert.ok(MODELS.every((m) => METHODS.every((x) => cellOf(m.key, x.id).runs === 80)));
+  assert.match(blockOf('results')!.ask!, /On the older model, how many of 80/);
+  assert.equal(PLAN_SCREENS.filter((id) => blockOf(id)!.ask).length, 9, 'nine blocks ask the room something, and the last one is the questions');
+});
+
+test('the welcome: three beats, three outcomes in the three ways a talk can leave someone better off, and how the room is asked to work', () => {
+  assert.deepEqual(WELCOME_BEATS.map((b) => b.href), ['/tour/welcome', '/tour/welcome?at=1', '/tour/welcome?at=2']);
+  assert.deepEqual(OUTCOMES.map((o) => o.verb), ['Understand', 'Try', 'Judge']);
+  assert.ok(OUTCOMES.every((o) => !/[!]/.test(o.text)));
+  assert.equal(HOW.length, 4);
+  assert.match(HOW[1].text, new RegExp(`last ${QUESTION_MINUTES} minutes`));
+  assert.match(HOW.map((h) => h.text).join(' '), /github\.com\/NickSmet\/code-surface-benchmark/);
+  assert.match(HOW.map((h) => h.text).join(' '), /\/workshop/);
+  // A screen of panels: one lit per beat, and an address that is not a beat is the first.
+  assert.equal(parseAt(new URLSearchParams(''), 3), 0);
+  assert.equal(parseAt(new URLSearchParams('at=2'), 3), 2);
+  assert.equal(parseAt(new URLSearchParams('at=9'), 3), 2);
+  assert.equal(parseAt(new URLSearchParams('at=-4'), 3), 0);
+  assert.equal(parseAt(new URLSearchParams('at=1.5'), 3), 0);
+  assert.equal(parseAt(new URLSearchParams('at=x'), 3), 0);
+  assert.deepEqual(panelBeats('/tour/x', ['a', 'b']), [{ href: '/tour/x', caption: 'a' }, { href: '/tour/x?at=1', caption: 'b' }]);
+  assert.deepEqual(WRAP_BEATS.map((b) => b.href), ['/tour/wrap', '/tour/wrap?at=1', '/tour/wrap?at=2']);
+});
+
+// ── your turn ────────────────────────────────────────────────────────────────
+
+const exercises = (): Exercise[] => exercisesOf({ programs, ratio: FRESH_QUESTIONS.find((q) => q.id === 'ratio')!.code });
+const exercise = (id: string): Exercise => exercises().find((e) => e.id === id)!;
+const runEx = (e: Exercise, code: string) => run(code, e.base.rationale);
+const tilesOf = (e: Exercise, code: string): string[] => e.tiles(runEx(e, code)).map((t) => t.value);
+const round2 = (x: number): number => Math.round(x * 100) / 100;
+
+test('your turn: every change is the base program with one place swapped, and each place is found exactly once', () => {
+  const all = exercises();
+  assert.deepEqual(all.map((e) => e.id), [...EXERCISE_IDS]);
+  for (const e of all) {
+    assert.ok(e.changes.length >= 2, `${e.id}: the change the room is asked for, and something to try after it`);
+    assert.equal(new Set(e.changes.map((c) => c.id)).size, e.changes.length);
+    assert.equal(new Set(e.changes.map((c) => c.label)).size, e.changes.length);
+    assert.ok(e.predict.endsWith('?'), `${e.id}: the room is asked a question`);
+    for (const code of [e.base.code, ...e.changes.map((c) => c.code)]) {
+      assert.ok(!code.split('\n').some((l) => l.trim() === ''), `${e.id}: a blank line is drawn as a line of nothing, so the programs have none`);
+      assert.match(code, /function main\(/);
+    }
+    for (const c of e.changes) assert.notEqual(c.code, e.base.code, `${e.id}/${c.id} changes something`);
+  }
+  assert.equal(swap('a b c', 'b', 'x'), 'a x c');
+  assert.throws(() => swap('a b c', 'x', 'y'), /no longer the one/);
+  assert.throws(() => swap('a a', 'a', 'b'), /no longer the one/);
+  assert.equal(compact('a\n\n  \nb\n'), 'a\nb');
+  // The bases are the benchmark's own programs and the tour's, with nothing but blank lines left out.
+  assert.equal(exercise('filter').base.code, compact(programs['filter-aggregate'].code));
+  assert.equal(exercise('rule').base.code, compact(programs['bulk-write'].code));
+  assert.equal(exercise('rule').base.rationale, programs['bulk-write'].rationale);
+  assert.equal(exercise('field').base.code, FRESH_QUESTIONS.find((q) => q.id === 'ratio')!.code);
+});
+
+test('your turn, a filter: West Europe takes platform-prod out, and the runtime still scans every record', () => {
+  const inv = buildInventory();
+  const e = exercise('filter');
+  const prod = inv.subscriptions.find((s) => s.name === 'Production')!;
+  const vms = inv.resources.filter((r): r is VirtualMachine => r.type === 'virtualMachine' && r.subscriptionId === prod.id && r.powerState === 'running');
+  const total = (rows: VirtualMachine[]) => round2(rows.reduce((n, r) => n + r.costMonthly, 0));
+  const money = (x: number) => `$${x.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+
+  const base = runEx(e, e.base.code);
+  assert.deepEqual(groupsOf(base).sort(), ['data-prod', 'platform-prod', 'web-prod']);
+  assert.deepEqual(tilesOf(e, e.base.code), ['3', money(total(vms)), '194', `\u2248 ${backToModelTokens(base)}`]);
+  assert.equal(money(total(vms)), '$5,461.22', 'the number the strip opens on');
+
+  const west = vms.filter((r) => r.location === 'westeurope');
+  const ref = runEx(e, e.changes[0].code);
+  assert.deepEqual(groupsOf(ref).sort(), ['data-prod', 'web-prod']);
+  assert.deepEqual(tilesOf(e, e.changes[0].code), ['2', money(total(west)), '194', `\u2248 ${backToModelTokens(ref)}`]);
+  assert.equal(money(total(west)), '$4,772.91');
+  assert.ok(backToModelTokens(ref) < backToModelTokens(base), 'a smaller answer is a smaller bill');
+  assert.equal(ref.totals.resourcesScanned, base.totals.resourcesScanned, 'a filter changes what is kept, not what is read');
+  assert.match(e.says(base, ref), /^platform-prod drops out, and the total goes from \$5,461\.22 to \$4,772\.91\. The runtime still scans all 194 records/);
+
+  const stopped = runEx(e, e.changes[1].code);
+  assert.equal(stopped.status, 'ok');
+  assert.match(e.says(base, stopped), /^data-prod drops out, and the total goes from \$5,461\.22 to \$728\.43\./);
+  assert.match(e.says(base, runEx(e, 'function main() { throw new Error("no") }')), /^The change did not run: /);
+});
+
+test('your turn, a field: two more fields cost the model about twice the answer, the whole record about sixteen times, and the scan does not move', () => {
+  const inv = buildInventory();
+  const e = exercise('field');
+  const base = runEx(e, e.base.code);
+  const two = runEx(e, e.changes[0].code);
+  const whole = runEx(e, e.changes[1].code);
+  assert.deepEqual([base, two, whole].map(fieldsPerRow), [2, 4, 19]);
+  assert.deepEqual([base, two, whole].map((o) => o.totals.resourcesScanned), [194, 194, 194]);
+  assert.deepEqual([base, two, whole].map(backToModelTokens), [79, 145, 1237]);
+  assert.deepEqual(tilesOf(e, e.changes[0].code), ['4', '\u2248 145', '194', '414']);
+  assert.deepEqual(tilesOf(e, e.changes[1].code), ['19', '\u2248 1,237', '194', '1,089']);
+  // The extra reads are the extra fields on every VM: forty-four of them, two more each.
+  const vms = inv.resources.filter((r) => r.type === 'virtualMachine');
+  assert.equal(two.totals.propertyReads - base.totals.propertyReads, vms.length * 2);
+  assert.match(e.says(base, two), /\(1\.8\u00d7\)\. It reads 88 more fields/);
+  assert.match(e.says(base, whole), /\(15\.7\u00d7\)/);
+  // Ground truth: the five dearest VMs per vCPU, and the fields asked for are theirs.
+  const top = (vms as VirtualMachine[])
+    .map((v) => ({ v, perVcpu: round2(v.costMonthly / v.vcpus) }))
+    .sort((a, b) => b.perVcpu - a.perVcpu)
+    .slice(0, 5);
+  const rows = (JSON.parse(two.content) as { result: Array<{ vm: string; perVcpu: number; size: string; group: string }> }).result;
+  assert.deepEqual(rows.map((r) => r.vm), top.map((t) => t.v.name));
+  assert.deepEqual(rows.map((r) => r.size), top.map((t) => t.v.vmSize));
+  assert.deepEqual(rows.map((r) => r.group), top.map((t) => t.v.resourceGroup));
+});
+
+test('your turn, a rule: a narrower rule is a smaller change set, derived by the runtime, and the model is told about the same', () => {
+  const inv = buildInventory();
+  const e = exercise('rule');
+  const base = runEx(e, e.base.code);
+  const vmsOnly = runEx(e, e.changes[0].code);
+  const idle = runEx(e, e.changes[1].code);
+  const env = runEx(e, e.changes[2].code);
+  assert.deepEqual([base, vmsOnly, idle, env].map((o) => [o.diff.length, o.resourcesAffected]), [[70, 37], [18, 11], [68, 35], [37, 37]]);
+  assert.deepEqual(tilesOf(e, e.changes[0].code), ['18', '11', '194', `\u2248 ${backToModelTokens(vmsOnly)}`]);
+  // Ground truth: the VMs the narrower rule tags, two tags each, and the VMs it deallocates, one power state each.
+  const untaggedVms = (inv.resources as VirtualMachine[]).filter((r) => r.type === 'virtualMachine' && r.resourceGroup === 'app-staging' && Object.keys(r.tags).length === 0);
+  const summary = (o: typeof base) => (JSON.parse(o.content) as { result: { taggedCount: number; deallocatedCount: number } }).result;
+  assert.equal(summary(vmsOnly).taggedCount, untaggedVms.length);
+  assert.equal(vmsOnly.diff.length, 2 * untaggedVms.length + summary(vmsOnly).deallocatedCount);
+  assert.equal(summary(base).deallocatedCount, summary(vmsOnly).deallocatedCount, 'the second rule is the same in both');
+  assert.equal(summary(idle).deallocatedCount, 2, 'two of the four have been idle for ninety days');
+  assert.equal(env.diff.every((d) => d.field !== 'tags.owner'), true, 'no owner tag when only the env tag is asked for');
+  assert.match(e.says(base, vmsOnly), /^The change set goes from 70 field changes on 37 resources to 18 on 11\./);
+  assert.ok(backToModelTokens(vmsOnly) < 2 * backToModelTokens(base), 'the model is told about the same');
+  // Nothing was applied: the estate is exactly as it was.
+  assert.deepEqual(inv, buildInventory());
+});
+
+test('your turn: an answer is the same as the reference only when the answer and the change set are', () => {
+  const e = exercise('rule');
+  const ref = runEx(e, e.changes[0].code);
+  assert.equal(sameAnswer(ref, ref), true);
+  assert.equal(sameAnswer(ref, runEx(e, e.base.code)), false);
+  assert.equal(sameAnswer(ref, runEx(e, e.changes[1].code)), false);
+  // A different program with the same effect is the same answer.
+  assert.equal(sameAnswer(ref, runEx(e, e.changes[0].code + '\n// the same, with a comment')), true);
+  const broken = runEx(e, 'function main() { throw new Error("no") }');
+  assert.equal(broken.status, 'error');
+  assert.equal(sameAnswer(broken, broken), false, 'a run that failed is not an answer');
+});
+
+test('your turn: six beats, two to an exercise, each a URL the screen reads back', () => {
+  const beats = turnBeats({ filter: 'A filter', field: 'A field', rule: 'A rule' });
+  assert.deepEqual(beats.map((b) => b.href), ['/tour/turn', '/tour/turn?step=1', '/tour/turn?ex=field', '/tour/turn?ex=field&step=1', '/tour/turn?ex=rule', '/tour/turn?ex=rule&step=1']);
+  for (const b of beats) assert.deepEqual(parseTurn(at(b.href).searchParams), { id: b.id, step: b.step }, b.href);
+  assert.deepEqual(beats.map((b) => b.group), ['filter', 'filter', 'field', 'field', 'rule', 'rule'], 'Shift and an arrow jump from one exercise to the next');
+  assert.equal(beats[0].caption, 'A filter \u00b7 Predict');
+  assert.equal(beats[1].caption, 'A filter \u00b7 Result');
+  assert.equal(turnHref('filter'), '/tour/turn');
+  assert.deepEqual(parseTurn(new URLSearchParams('ex=nope&step=7')), { id: 'filter', step: 0 });
+  assert.deepEqual(parseTurn(new URLSearchParams('step=1')), { id: 'filter', step: 1 });
+  assert.deepEqual(moveFor('group-next', 0, beats.map((b) => b.group)), { to: 2 });
+});
+
+// ── the last screen ──────────────────────────────────────────────────────────
+
+test('the wrap: each line of the recap is read off the run it summarises, and says no more than the screens showed', () => {
+  const inv = buildInventory();
+  const lines = recapOf({ inv, projection: buildProjection(inv), programs });
+  assert.equal(lines.length, 5);
+  assert.deepEqual(lines.map((l) => l.screens), [[2], [3], [4], [5, 6], [7]]);
+  const billed = costFacts(replayCatalog({ task: 'granular-read' })).billed;
+  assert.equal(billed, 5894);
+  assert.match(lines[0].text, new RegExp(`^One question took 3 narrow calls\\. The run was billed \u2248 5,894 tokens for a 14-token answer`));
+  assert.match(lines[2].text, /refused 4 of the 4 questions nobody had planned for\.$/);
+  assert.match(lines[3].text, /The cost question scans 194 records and sends back \u2248 63 tokens\. The tagging rule is 70 field changes on 37 resources, held for a person to approve\.$/);
+  assert.match(lines[4].text, /^80 of 80 on all three models\. On the older one the other methods got 39 to 56\. A narrow lookup is the exception: a direct call costs 0\.6\u00d7 the tokens\.$/);
+  assert.equal(REPORTED.lookupDirectCallTokens, '0.6\u00d7');
+  assert.deepEqual([codeSpan(['newest', 'newer', 'older']).min, othersSpan(['older']).min, othersSpan(['older']).max], [80, 39, 56]);
+  assert.ok(lines.every((l) => !/secure|safe|guarantee/i.test(l.text)));
+});
+
+test('the wrap: six questions about an estate that is not this one, the claims about running code are the README\u2019s, and the files named are in the repository', () => {
+  assert.equal(ASKS.length, 6);
+  for (const a of ASKS) {
+    assert.ok(a.title.endsWith('?'), a.title);
+    assert.ok(a.screens.length > 0 && a.screens.every((s) => SCREENS.some((x) => x.n === s)), `${a.title} points at screens that exist`);
+  }
+  const readme = text('README.md');
+  assert.match(readme, /It is not a security sandbox/);
+  assert.match(readme, /isolated process\/container\/microVM/);
+  const where = ASKS.find((a) => a.title === 'Where does the code run?')!;
+  assert.match(where.because, /not a security sandbox/);
+  assert.match(where.because, /isolated process, container or microVM, with credentials kept outside it/);
+  assert.ok(!/\b(is|are) (safe|secure)\b/i.test(ASKS.map((a) => a.because).join(' ')), 'the sandbox is never called secure');
+  for (const f of TAKEAWAY.files) assert.ok(existsSync(new URL(`../${f.path}`, import.meta.url)), `${f.path} is in the repository`);
+  assert.equal(TAKEAWAY.open, '/workshop');
+  assert.equal(SEEDS.length, 3);
+});
+
+test('the workshop screens keep to the tour\u2019s frame: a step row that presenter mode hides, and the rail told how far along they are', () => {
+  for (const id of WORKSHOP_ONLY) {
+    const src = text(`src/routes/tour/${id}/+page.svelte`);
+    assert.match(src, /<div class="screen">/, `${id}: the same frame as the others`);
+    assert.match(src, /<div class="nav">\s*<BeatNav/, `${id}: the step row is .nav`);
+    assert.match(src, /<svelte:head>\s*<title>[^<]+· From tools to code surfaces<\/title>/, `${id}: a title`);
+  }
+  assert.match(text('src/routes/tour/welcome/+page.svelte'), /beats=\{WELCOME_BEATS\}/);
+  assert.match(text('src/routes/tour/wrap/+page.svelte'), /beats=\{WRAP_BEATS\}/);
+  assert.match(text('src/routes/tour/turn/+page.svelte'), /beats=\{BEATS\}/);
+  // Everything that walks the screens walks the visitor's list, not the tour's.
+  for (const f of ['BeatNav', 'BeatKeys', 'PresenterRail', 'TourStepper']) {
+    const src = text(`src/lib/components/tour/${f}.svelte`);
+    assert.match(src, /presenter\.screens/, `${f} reads the screens the visitor walks`);
+    assert.ok(!/\bSCREENS\b/.test(src.replace(/WORKSHOP_SCREENS/g, '')), `${f} does not read the tour's seven`);
+  }
+});
+
+test('presenter: a screen that is leaving does not answer keys for the one arriving, and takes down only its own report', () => {
+  // A screen that has been left can stay in the page for a moment (a fade that has not finished) with the address already the next screen's.
+  for (const f of ['BeatNav', 'BeatKeys']) {
+    const src = text(`src/lib/components/tour/${f}.svelte`);
+    assert.match(src, /const home = untrack\(\(\) => page\.url\.pathname\);/, `${f}: the address it was shown at`);
+    assert.match(src, /page\.url\.pathname !== home/, `${f}: its keys are for that address alone`);
+    assert.match(src, /presenter\.report\(mine\)/, `${f}: it reports one object, and keeps it`);
+    assert.match(src, /if \(mine\) presenter\.release\(mine\)/, `${f}: and takes down that one`);
+    assert.ok(!/presenter\.report\(null\)/.test(src), `${f}: never the next screen's report`);
+  }
+  const presenter = text('src/lib/tour/presenter.svelte.ts');
+  assert.match(presenter, /beat = \$state\.raw<BeatReport \| null>\(null\);/, 'the report is compared by identity, so it is not proxied');
+  assert.match(presenter, /release\(b: BeatReport\): void \{\s*if \(this\.beat === b\) this\.beat = null;\s*\}/);
+  // On Your turn the beat follows the stage: a program that has run is the result, whoever wrote it.
+  const turn = text('src/routes/tour/turn/+page.svelte');
+  assert.match(turn, /function follow\(out: RunOutcome\): void \{[\s\S]*?const step = out === baseOutcome \? 0 : 1;[\s\S]*?replaceState: true/);
+  assert.match(turn, /function land\(out: RunOutcome, src: string\): void \{[\s\S]*?follow\(out\);/);
+});
+
+// ── the script ───────────────────────────────────────────────────────────────
+// docs/workshop-script.md is what the presenter reads from. These hold it to the plan, to the screens and to the saved
+// results, so that it cannot say twelve minutes where the rail says nine, or a figure the screen does not show.
+
+const script = text('docs/workshop-script.md');
+interface Section {
+  heading: string;
+  lines: string[];
+}
+const sections: Section[] = [];
+for (const line of script.split('\n')) {
+  if (line.startsWith('## ')) sections.push({ heading: line.slice(3), lines: [] });
+  else sections.at(-1)?.lines.push(line);
+}
+const sectionNamed = (heading: string): Section => {
+  const found = sections.filter((s) => s.heading === heading);
+  assert.equal(found.length, 1, `one section called "${heading}"`);
+  return found[0];
+};
+const bodyOf = (s: Section): string => s.lines.join('\n');
+/** The cells of a table row, split on the bars that are not escaped. */
+const cellsOf = (row: string): string[] => row.trim().slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim());
+/** The rows of a section's tables that have this many cells, the headers and the rules included. */
+const tableRows = (s: Section, cells: number): string[][] => s.lines.filter((l) => l.startsWith('|')).map(cellsOf).filter((r) => r.length === cells);
+/** "1:30" as seconds: null for any other text. */
+const secondsOf = (cell: string): number | null => {
+  const m = cell.match(/^(\d+):([0-5]\d)$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+const mmss = (s: number): string => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
+const group = (n: number): string => n.toLocaleString('en-US');
+/** The heading a block's section has: its screen's number as a circled digit, its title, and its place in the ninety. */
+const headingOf = (b: Block): string => {
+  const n = WORKSHOP_SCREENS.find((s) => s.id === b.screen)!.n;
+  return `${n === undefined ? '' : `${String.fromCodePoint(0x2460 + n - 1)} `}${b.title} \u00b7 ${rangeOf(b)}`;
+};
+const sectionOf = (screen: string): Section => sectionNamed(headingOf(blockOf(screen)!));
+/** How many beats each screen has, counted from what the screen walks and not from the script. */
+function beatCounts(): Record<string, number> {
+  const inv = buildInventory();
+  const cmp = compareSurfaces('filter-aggregate', programs['filter-aggregate']);
+  return {
+    welcome: WELCOME_BEATS.length,
+    estate: LENS_ORDER.length + 1,
+    tools: lastFrame(replayCatalog({ task: 'granular-read' })) + 1,
+    strains: buildBeats(buildStrains(inv, buildToolRungs(inv))).length,
+    language: buildLadder(inv, cmp.code).length - 1 + 3,
+    object: STEP_IDS.length,
+    code: exampleBeats().length,
+    turn: turnBeats({ filter: 'a', field: 'b', rule: 'c' }).length,
+    results: RESULTS_BEATS.length,
+    wrap: WRAP_BEATS.length
+  };
+}
+
+test('the script: a section for each block of the plan, in its order, and under it the ask, the beats and the minutes the plan gives', () => {
+  const counts = beatCounts();
+  const timed = sections.filter((s) => /\u00b7 \d+\u2013\d+ min$/.test(s.heading));
+  assert.deepEqual(timed.map((s) => s.heading), BLOCKS.map(headingOf), 'the sections are the plan\u2019s blocks, in its order, called what the agenda calls them');
+  for (const b of BLOCKS) {
+    const s = sectionOf(b.screen);
+    assert.equal(bodyOf(s).includes('**Ask.**'), b.ask !== undefined, `${b.screen}: a section has an ask when the plan has one`);
+    if (b.ask) assert.ok(s.lines.includes(`**Ask.** ${b.ask}`), `${b.screen}: the room is asked what the plan says`);
+    assert.equal(Number(bodyOf(s).match(/\*\*Beats\.\*\* (\d+)/)?.[1]), counts[b.screen], `${b.screen}: the script counts the beats the screen has`);
+    const holds = tableRows(s, 4).map((r) => secondsOf(r[3])).filter((x): x is number => x !== null);
+    assert.equal(sum(holds), minutesOf(b) * 60, `${b.screen}: the holds come to ${mmss(sum(holds))} and the plan gives ${minutesOf(b)} minutes`);
+  }
+});
+
+test('the script: the run of show is the plan row for row, and the totals it quotes are the plan\u2019s and the screens\u2019', () => {
+  const counts = beatCounts();
+  const rows = tableRows(sectionNamed('Run of show'), 4).filter((r) => / min$/.test(r[0]));
+  assert.equal(rows.length, BLOCKS.length);
+  BLOCKS.forEach((b, i) => {
+    assert.equal(rows[i][0], rangeOf(b), `${b.screen}: its minutes`);
+    assert.ok(b.ask === undefined ? rows[i][2].startsWith('(none') : rows[i][2] === b.ask, `${b.screen}: what the room is asked`);
+    assert.equal(Number(rows[i][3]), counts[b.screen], `${b.screen}: its beats`);
+  });
+  const beats = sum(Object.values(counts));
+  assert.equal(beats, 78);
+  assert.equal(WORKSHOP_SCREENS.length, 10);
+  assert.equal(SCREENS.length, 7);
+  assert.equal(beats - counts.welcome - counts.turn - counts.wrap, 66, 'the 20-minute talk is the seven screens, and the tour script says 66 beats');
+  assert.match(text('docs/tour-script.md'), /Seven screens, 66 beats\./);
+  for (const said of [
+    `Ten screens, ${beats} beats`,
+    `is ${beats - 1} presses`,
+    `${TOTAL_MINUTES} minutes online: ${QUESTIONS_FROM} of talk, ${QUESTION_MINUTES} for questions`,
+    `Talk ends at minute ${QUESTIONS_FROM}`,
+    `**Minute ${QUESTIONS_FROM}.**`,
+    `**Minute ${TOTAL_MINUTES - 5}.**`,
+    `**Minute ${TOTAL_MINUTES - 1}.**`
+  ]) {
+    assert.ok(script.includes(said), `the script says "${said}"`);
+  }
+  assert.equal(BLOCKS.filter((b) => b.ask).length, 9);
+  for (const said of ['at nine marked moments', 'Nine times I will stop', 'Nine predictions in the chat']) assert.ok(script.includes(said), said);
+});
+
+test('the script: the time checks fall where the blocks end, and the cuts add up to what each block says it saves', () => {
+  const checks = tableRows(sectionNamed('Keeping time'), 3).filter((r) => /^\d+$/.test(r[0]));
+  assert.deepEqual(checks.map((r) => Number(r[0])), BLOCKS.slice(0, -1).map((b) => b.to), 'a check at the end of every block but the last');
+  const cutSection = sectionNamed('If the clock says otherwise');
+  const cuts = tableRows(cutSection, 3).map((r) => secondsOf(r[2])).filter((x): x is number => x !== null);
+  const saved = BLOCKS.flatMap((b) => {
+    const m = bodyOf(sectionOf(b.screen)).match(/\*\*If you are behind\.\*\*[^\n]*? Saves (\d+:\d{2})\./);
+    return m ? [secondsOf(m[1])!] : [];
+  });
+  assert.ok(saved.length >= 8);
+  assert.deepEqual([...cuts].sort((a, b) => a - b), [...saved].sort((a, b) => a - b), 'the cuts listed at the end are the ones each block gives');
+  assert.ok(bodyOf(cutSection).includes(`Together they are ${mmss(sum(cuts))}.`));
+});
+
+test('the script: the figures it quotes on the tools screen, the code screen, Your turn and the results are the ones the screens compute', () => {
+  const has = (s: Section, q: string): void => assert.ok(bodyOf(s).includes(q), `"${q}" is in "${s.heading}"`);
+
+  // ② the six narrow tools on the question: what each turn sends, and what the run was billed.
+  const tools = replayCatalog({ task: 'granular-read' });
+  const [t1, t2, t3] = tools.turns;
+  const bill = runBill(tools);
+  const facts = costFacts(tools);
+  const two = sectionOf('tools');
+  has(two, `${t1.parts.system} of instructions`);
+  has(two, `${group(t2.promptTokens)} tokens against ${group(t1.promptTokens)}`);
+  has(two, `input ${group(t3.promptTokens)}`);
+  has(two, `${group(bill.input)} in, ${bill.output} out`);
+  has(two, `${facts.multiple.toFixed(1)} times`);
+  has(two, `${Math.round(facts.fixedShare * 100)} percent`);
+  has(two, `about ${group(Math.round(facts.billed / 100) * 100)}`);
+  // ④ the code tool's definition against the six narrow tools'.
+  has(sectionOf('language'), `${group(estimateTokens(JSON.stringify(CODE_TOOLS)))} tokens against ${t1.parts.tools}`);
+
+  // ⑥ the programs, run on the object.
+  const six = sectionOf('code');
+  const cost = exBuild('cost');
+  const tag = exBuild('tag');
+  const disks = exBuild('disks');
+  const ratio = exBuild('ratio');
+  const lookup = exBuild('lookup');
+  const strip = (e: ReturnType<typeof exBuild>): { pair: string; times: string } => {
+    const s = e.view.strip;
+    assert.equal(s?.kind, 'bill');
+    if (s?.kind !== 'bill') return { pair: '', times: '' };
+    const [cat, code] = s.bars;
+    return {
+      pair: `Catalogue best case ${group(cat.bill.total)}, ${cat.calls} call; Code surface ${group(code.bill.total)}, ${code.calls} call`,
+      times: (code.bill.total / cat.bill.total).toFixed(1)
+    };
+  };
+  const c = (e: ReturnType<typeof exBuild>) => e.view.counters;
+  has(six, strip(cost).pair);
+  has(six, strip(lookup).pair);
+  has(six, `billed ${strip(lookup).times} times as much`);
+  has(six, `Scanned ${c(cost).scanned} (${c(cost).reads} field reads`);
+  has(six, `Records it used ${c(cost).used} of ${c(cost).scanned}`);
+  has(six, `Scanned ${c(tag).scanned} (${c(tag).reads} field reads), Proposed changes: ${c(tag).used} ${c(tag).usedSub}`);
+  has(six, `${c(disks).scanned} scanned (${c(disks).reads} field reads), ${c(disks).used} records used`);
+  has(six, `${c(lookup).used} of ${c(lookup).scanned}`);
+  for (const e of [cost, tag, disks, ratio, lookup]) has(six, `\u2248 ${c(e).tokens} tokens`);
+  has(six, reviewCard(tag.outcome)!.summary.replace(/\s+/g, ' '));
+  const refusal = CONTRACT_PROBES.find((p) => p.id === 'cost')!;
+  const refused = buildExample({ def: defOf('break'), program: { code: refusal.code }, outcome: runTracked({ code: refusal.code, projection: exProj }), inv: exInv });
+  has(six, `\u2248 ${refused.answer.tokens} tokens`);
+
+  // Your turn: the tiles before and after each change.
+  const turn = sectionOf('turn');
+  const filter = exercise('filter');
+  const field = exercise('field');
+  const rule = exercise('rule');
+  const tile = (e: Exercise, code: string, i: number): string => tilesOf(e, code)[i];
+  const arrow = (e: Exercise, to: string, i: number): string => `${tile(e, e.base.code, i)} \u2192 ${tile(e, to, i)}`;
+  for (const i of [0, 1, 2, 3]) has(turn, `${tile(filter, filter.base.code, i)} \u2192 ?`);
+  for (const i of [0, 1]) has(turn, `${tile(rule, rule.base.code, i)} \u2192 ?`);
+  has(turn, tile(filter, filter.changes[0].code, 1));
+  has(turn, tile(filter, filter.changes[1].code, 1));
+  for (const i of [0, 1, 2, 3]) has(turn, arrow(field, field.changes[0].code, i));
+  has(turn, tile(field, field.changes[1].code, 1).replace('\u2248 ', ''));
+  for (const i of [0, 1, 3]) has(turn, arrow(rule, rule.changes[0].code, i));
+  const idle = runEx(rule, rule.changes[1].code);
+  const env = runEx(rule, rule.changes[2].code);
+  has(turn, `${idle.diff.length} fields on ${idle.resourcesAffected} resources`);
+  has(turn, `${env.diff.length} fields on the same ${env.resourcesAffected} resources`);
+
+  // ⑦ the measured results.
+  const seven = sectionOf('results');
+  const older = othersSpan(['older']);
+  const newer = othersSpan(['newer', 'newest']);
+  has(seven, `${older.min} to ${older.max} of 80`);
+  has(seven, `Between ${older.min} and ${older.max}.`);
+  has(seven, `the other five get ${newer.min} to ${newer.max} of 80`);
+  const cents = (usd: number): number => Math.round(usd * 100);
+  has(seven, `${cents(perThousandRight(cellOf('newest', CODE)))} cents per thousand right answers for the code surface on the newest model, against ${cents(nextCheapest('newest').usd)} for the next cheapest`);
+  const x = multiples();
+  for (const q of [fmtTimes(x.model), fmtTimes(x.method), fmtTimes(x.both)]) has(seven, q);
+  has(seven, `programs over the catalogue got ${cellOf('older', 'naive-ptc').correct} of 80, and over the tuned catalogue ${cellOf('older', 'tuned-ptc').correct}`);
+  has(seven, `${REPORTED.lookupDirectCallTokens.replace('\u00d7', '')} times the tokens`);
+  // What the questions section says of programs over the catalogue: on the newer models they cost between a quarter and a half of one-by-one calls.
+  const share = (['newest', 'newer'] as ModelKey[]).flatMap((m) =>
+    (['naive', 'tuned'] as const).map((k) => cellOf(m, `${k}-ptc` as ArmId).totalUsd / cellOf(m, `${k}-direct` as ArmId).totalUsd)
+  );
+  assert.ok(Math.min(...share) >= 0.25 && Math.max(...share) <= 0.5, `${share.map((s) => s.toFixed(2)).join(', ')}`);
+  has(sectionNamed('Questions you will get'), 'between a quarter and a half of calling the same tools one by one');
+  has(sectionNamed('Questions you will get'), `On the older model they fall to ${cellOf('older', 'naive-ptc').correct}, and to ${cellOf('older', 'tuned-ptc').correct} over the tuned catalogue`);
+});
+
+test('the script: its pictures, its links to other documents and the addresses it gives all lead somewhere', () => {
+  const docs = (p: string) => new URL(`../docs/${p}`, import.meta.url);
+  const pictures = [...script.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)].map((m) => m[1]);
+  assert.ok(pictures.length >= 25);
+  for (const p of pictures) assert.ok(existsSync(docs(p)), `${p} is a picture under docs/`);
+
+  for (const m of script.matchAll(/(?<!!)\[[^\]]+\]\(([^)#]+\.md)(#[^)]*)?\)/g)) {
+    assert.ok(existsSync(docs(m[1])), `${m[1]} is a document under docs/`);
+    if (!m[2]) continue;
+    const slugs = [...readFileSync(docs(m[1]), 'utf8').matchAll(/^#{1,6} (.+)$/gm)].map((h) => h[1].toLowerCase().replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-'));
+    assert.ok(slugs.includes(m[2].slice(1)), `${m[1]} has a heading for ${m[2]}`);
+  }
+  // A file named in backticks is in the repository. The saved runs are not always there (they are a local export), so they are not asked for.
+  for (const m of script.matchAll(/`((?:src|docs|tests|scripts)\/[\w./-]+)`/g)) {
+    if (!m[1].startsWith('docs/runs/')) assert.ok(existsSync(new URL(`../${m[1]}`, import.meta.url)), `${m[1]} is in the repository`);
+  }
+
+  const pages = new Set(['/workshop', ...WORKSHOP_SCREENS.map((s) => s.href)]);
+  const urls = [...script.matchAll(/`((?:\/tour\/|\/workshop)[^`\s]*)`/g)].map((m) => m[1]);
+  assert.ok(urls.length >= 20);
+  const isBeat = (u: URL): boolean => {
+    const q = u.searchParams;
+    const whole = u.pathname + u.search;
+    switch (u.pathname) {
+      case '/tour/welcome': return !q.has('at') || parseAt(q, WELCOME_BEATS.length) === Number(q.get('at'));
+      case '/tour/wrap': return !q.has('at') || parseAt(q, WRAP_BEATS.length) === Number(q.get('at'));
+      case '/tour/turn': { const t = parseTurn(q); return turnHref(t.id, t.step) === whole; }
+      case '/tour/code': { const s = parseExampleState(q); return exampleHref(s.id, s.step) === whole; }
+      case '/tour/results': return resultsHref(parseResultsBeat(q)) === whole;
+      case '/tour/object': return !q.has('step') || (Number.isInteger(Number(q.get('step'))) && Number(q.get('step')) >= 0 && Number(q.get('step')) <= LAST_STEP);
+      case '/tour/tools': return !q.has('step') || (Number.isInteger(Number(q.get('step'))) && Number(q.get('step')) >= 0);
+      case '/tour/language': return !q.has('stage') || ['grow', 'limits'].includes(q.get('stage')!);
+      default: return true;
+    }
+  };
+  for (const u of urls) {
+    const url = at(u);
+    assert.ok(pages.has(url.pathname), `${u} is a screen`);
+    assert.ok(isBeat(url), `${u} is a beat the screen reads back`);
+  }
 });

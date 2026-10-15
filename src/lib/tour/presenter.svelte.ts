@@ -1,5 +1,7 @@
 import { getContext, setContext } from 'svelte';
+import { FORMAT_COOKIE, FORMAT_MAX_AGE } from './format';
 import { MODE_COOKIE, MODE_MAX_AGE } from './mode';
+import { screensOf, type Format, type TourScreen } from './screens';
 
 /** Where the screen on show is, for the progress along the top of the page. */
 export interface BeatReport {
@@ -17,20 +19,44 @@ export type Pop = { id: number; note: string | null };
 export class Presenter {
   /** The chrome is out of the way: a thin rail along the top, no Back and Next, and the stage takes what is left. */
   on = $state(false);
+  /** The tour or the workshop: which screens there are, and so what the rail, the bar and the keys walk. */
+  format = $state<Format>('tour');
   helpOpen = $state(false);
-  beat = $state<BeatReport | null>(null);
+  /** Raw, not proxied: `release` compares the report it is given with this one by identity. */
+  beat = $state.raw<BeatReport | null>(null);
   pop = $state<Pop | null>(null);
 
   #timer: ReturnType<typeof setTimeout> | undefined;
   #seq = 0;
 
-  constructor(on: boolean) {
+  constructor(on: boolean, format: Format = 'tour') {
     this.on = on;
+    this.format = format;
+  }
+
+  /** The screens of the talk being given. */
+  get screens(): readonly TourScreen[] {
+    return screensOf(this.format);
+  }
+
+  setFormat(format: Format): void {
+    this.format = format;
+    if (typeof document !== 'undefined') {
+      document.cookie = `${FORMAT_COOKIE}=${format}; path=/; max-age=${FORMAT_MAX_AGE}; samesite=lax`;
+    }
   }
 
   /** Called by a screen whenever it moves, so the rail can show how far through the screen the talk is. */
   report(b: BeatReport | null): void {
     this.beat = b;
+  }
+
+  /**
+   * A screen that goes takes its report with it, but only its own: a screen that is leaving can outlast the one that is
+   * arriving by a fade, and must not clear what the new one has already said.
+   */
+  release(b: BeatReport): void {
+    if (this.beat === b) this.beat = null;
   }
 
   setOn(on: boolean): void {
