@@ -9,12 +9,14 @@
   import { buildProjection } from '$lib/inventory/projection';
   import { SCHEMA_DOC } from '$lib/surfaces/code/helpers';
   import { CODE_TOOLS } from '$lib/surfaces/code/schemas';
+  import BeatKeys from '$lib/components/tour/BeatKeys.svelte';
   import ObjectStage from '$lib/components/tour/ObjectStage.svelte';
   import Segmented from '$lib/components/tour/Segmented.svelte';
   import TourNav from '$lib/components/tour/TourNav.svelte';
   import Transport from '$lib/components/tour/Transport.svelte';
   import { ACTS, LAST_STEP, PROGRAM_MAX_LINES, STEP_IDS, actOf, buildObjectStage, type ActId, type StepId } from '$lib/tour/object-stage';
   import { contractExcerpt, programBlocks, stepCopy, traceAccess } from '$lib/tour/object-trace';
+  import { usePresenter } from '$lib/tour/presenter.svelte';
   import { parseSolutionPrograms } from '$lib/tour/programs';
   import { estimateTokens } from '$lib/tour/tokens';
 
@@ -139,16 +141,17 @@
     return () => clearTimeout(id);
   });
 
+  const presenter = usePresenter();
+  /** Shift and an arrow jump from one part of the walkthrough to the next. */
+  const stepGroups = STEP_IDS.map((_, i) => actOf(i));
+
+  // The arrow, Page and Home/End keys are BeatKeys'; Space plays and pauses.
   function onWindowKey(e: KeyboardEvent): void {
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || presenter.helpOpen) return;
     const el = e.target instanceof HTMLElement ? e.target : null;
     // Keys inside a form control or the part selector belong to that widget.
     if (el?.closest('input, textarea, select, dialog, [role=radio], [role=tab]') || el?.isContentEditable) return;
-    if (e.key === 'ArrowRight') setFrame(frame + 1);
-    else if (e.key === 'ArrowLeft') setFrame(frame - 1);
-    else if (e.key === 'Home') setFrame(0);
-    else if (e.key === 'End') setFrame(LAST_STEP);
-    else if (e.key === ' ' && !el?.closest('button, a, summary')) togglePlay();
+    if (e.key === ' ' && !el?.closest('button, a, summary')) togglePlay();
     else return;
     e.preventDefault();
   }
@@ -158,6 +161,7 @@
   <title>The object · From tools to code surfaces</title>
 </svelte:head>
 <svelte:window onkeydown={onWindowKey} />
+<BeatKeys at={frame} groups={stepGroups} onstep={setFrame} ignoreIn="dialog, [role=radio], [role=tab]" />
 
 <div class="screen">
   <header class="top">

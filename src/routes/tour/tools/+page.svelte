@@ -1,12 +1,13 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { browser } from '$app/environment';
-  import { replaceState } from '$app/navigation';
+  import { afterNavigate, replaceState } from '$app/navigation';
   import { Bot, Play, User, Wrench, X } from '@lucide/svelte';
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { CATALOG_TOOLS } from '$lib/surfaces/catalog/schemas';
   import { TASKS } from '$lib/tasks';
   import { MAX_ITERATIONS } from '$lib/agent/limits';
+  import BeatKeys from '$lib/components/tour/BeatKeys.svelte';
   import CallDetail from '$lib/components/tour/CallDetail.svelte';
   import CallRail from '$lib/components/tour/CallRail.svelte';
   import EstateMap, { type GroupPaint } from '$lib/components/tour/EstateMap.svelte';
@@ -24,6 +25,7 @@
   import type { TaskId } from '$lib/tour/answers';
   import { buildEstateModel } from '$lib/tour/estate';
   import { ANSWER_NOTE, CACHE_TIP } from '$lib/tour/explain';
+  import { usePresenter } from '$lib/tour/presenter.svelte';
   import { prettyJson } from '$lib/tour/json-highlight';
   import { needleFor } from '$lib/tour/needles';
   import { COLORS, touchPaint, type Paint } from '$lib/tour/paint';
@@ -198,6 +200,11 @@
     }
   }
 
+  // Coming back from the screen after this one names the last step as far past the end; say which step that is.
+  afterNavigate(() => {
+    if (startStep > last) syncUrl();
+  });
+
   function setFrame(n: number): void {
     playing = false;
     manual = null;
@@ -290,18 +297,19 @@
     return `${u.name}${extra}${touched ? '. Touched so far.' : '. Untouched so far.'}`;
   }
 
+  const presenter = usePresenter();
+  /** Shift and an arrow jump from one turn of the model to the next. The question, before any turn, is a group of its own. */
+  const frameGroups = $derived(Array.from({ length: last + 1 }, (_, i) => (i === 0 ? 'question' : `turn ${turnAt(replay, i)}`)));
+
+  // The arrow, Page and Home/End keys are BeatKeys'; Space plays and pauses, and Escape lets go of a pod.
   function onWindowKey(e: KeyboardEvent): void {
     // While the result is open nothing behind it moves, wherever focus has landed. (Escape is the dialog's own.)
-    if (modalStep !== null) return;
+    if (modalStep !== null || presenter.helpOpen) return;
     if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target instanceof HTMLElement ? e.target : null;
     // Keys inside a form control, a tab list, the pod map or the result dialog belong to that widget.
     if (t?.closest('input, textarea, select, dialog, [role=radio], [role=tab], [data-unit]') || t?.isContentEditable) return;
-    if (e.key === 'ArrowRight') setFrame(f + 1);
-    else if (e.key === 'ArrowLeft') setFrame(f - 1);
-    else if (e.key === 'Home') setFrame(0);
-    else if (e.key === 'End') setFrame(last);
-    else if (e.key === ' ' && !t?.closest('button, a, summary')) togglePlay();
+    if (e.key === ' ' && !t?.closest('button, a, summary')) togglePlay();
     else if (e.key === 'Escape') pinnedId = null;
     else return;
     e.preventDefault();
@@ -312,6 +320,7 @@
   <title>Naive tools · From tools to code surfaces</title>
 </svelte:head>
 <svelte:window onkeydown={onWindowKey} />
+<BeatKeys at={f} groups={frameGroups} onstep={setFrame} enabled={modalStep === null} />
 
 <div class="screen">
   <header class="top">

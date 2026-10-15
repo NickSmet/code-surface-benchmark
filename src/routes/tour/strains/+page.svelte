@@ -48,7 +48,7 @@
 </svelte:head>
 
 <header class="head">
-  <p class="t-kicker">③ Where it strains</p>
+  <p class="t-kicker t-chrome">③ Where it strains</p>
   <h1 class="t-h1">Each question strains the tools somewhere else.</h1>
   {#if overview}
     <p class="t-lead" transition:slide={{ duration: ms(200) }}>
@@ -137,7 +137,7 @@
 <div class="nav">
   <BeatNav
     {at}
-    beats={beats.map((b, i) => ({ href: hrefAt(i), caption: b.caption }))}
+    beats={beats.map((b, i) => ({ href: hrefAt(i), caption: b.caption, group: b.row === null ? 'overview' : `row ${b.row}` }))}
     before={{ href: '/tour/tools', label: 'Naive tools' }}
     after={{ href: '/tour/language', label: 'Fix them one at a time' }}
     {nextLabel}

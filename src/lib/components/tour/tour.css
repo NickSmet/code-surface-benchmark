@@ -221,3 +221,24 @@ pre.t-json {
     font-size: 21px;
   }
 }
+
+/*
+ * Presenter mode. The step bar is replaced by a rail along the top that takes no room, Back and Next are gone (the
+ * keys, the rail and the bar it brings down do the stepping), and what they took goes to the stage. Every screen
+ * keeps the proportions it has; each one only gets taller. `.nav` is what each screen calls its Back and Next row.
+ */
+.tour.present {
+  --tour-top: 0px;
+  --tour-pad: 16px;
+  --tour-gap: 6px;
+}
+.tour.present .tour-main {
+  padding: 10px var(--tour-pad) 8px;
+}
+.tour.present .nav {
+  display: none !important;
+}
+/* Orientation for a reader ("③ Where it strains", "← Back to…"). A presenter says where we are, and the rail shows it. */
+.tour.present .t-chrome {
+  display: none;
+}

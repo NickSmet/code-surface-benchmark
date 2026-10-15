@@ -49,6 +49,9 @@ import {
   type RungId
 } from '../src/lib/tour/language';
 import { ORIGIN, buildStrains, strainLink, withOrigin } from '../src/lib/tour/strains';
+import { SCREENS, crossTo, screenIndexOf } from '../src/lib/tour/screens';
+import { beatActionFor, globalActionFor, moveFor, typingIn, type BeatAction } from '../src/lib/tour/beat-keys';
+import { modeOf, parseMode } from '../src/lib/tour/mode';
 import { QUERY_KEYS, buildBeats, buildStages, describeQuery, pickFields, shortIds, showArgs, solvedRows } from '../src/lib/tour/strain-stage';
 import {
   ACTS,
@@ -2424,8 +2427,7 @@ test('results: every row is a bar for the cell it names, and one row on each pan
 test('the stepper lists the seven screens, every screen it names is a page, and every page links only to pages', () => {
   const routes = new URL('../src/routes/tour/', import.meta.url);
   const pages = readdirSync(routes, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(new URL(`${d.name}/+page.svelte`, routes))).map((d) => `/tour/${d.name}`);
-  const stepper = readFileSync(new URL('../src/lib/components/tour/TourStepper.svelte', import.meta.url), 'utf8');
-  const steps = [...stepper.matchAll(/href: '(\/tour\/[a-z]+)'/g)].map((m) => m[1]);
+  const steps = SCREENS.map((s) => s.href);
   assert.deepEqual(steps, ['/tour/estate', '/tour/tools', '/tour/strains', '/tour/language', '/tour/object', '/tour/code', '/tour/results']);
   assert.deepEqual([...pages].sort(), [...steps].sort(), 'no page is missing from the stepper, and no step is missing a page');
   for (const d of pages) {
@@ -2434,4 +2436,177 @@ test('the stepper lists the seven screens, every screen it names is a page, and 
   }
   const results = readFileSync(new URL('../src/lib/tour/results.ts', import.meta.url), 'utf8');
   assert.ok(!/href: '\/tour\/(?!results)/.test(results), 'the results module does not link out');
+});
+
+// ── presenter mode ───────────────────────────────────────────────────────────
+
+test('presenter: the screens are one list, and from any screen the one before and the one after are found', () => {
+  assert.deepEqual(SCREENS.map((s) => s.id), ['estate', 'tools', 'strains', 'language', 'object', 'code', 'results']);
+  assert.equal(screenIndexOf('/tour/code'), 5);
+  assert.equal(screenIndexOf('/tour/code/'), 5);
+  assert.equal(screenIndexOf('/tour'), -1);
+  assert.equal(screenIndexOf('/tour/codex'), -1, 'a path that only starts like a screen is not that screen');
+  assert.equal(screenIndexOf('/'), -1);
+  // Going on arrives at the first beat of the next screen; going back arrives at the last beat of the one before.
+  assert.deepEqual(crossTo('/tour/tools', 1), { screen: SCREENS[2], href: '/tour/strains' });
+  assert.deepEqual(crossTo('/tour/strains', -1), { screen: SCREENS[1], href: SCREENS[1].end });
+  assert.equal(crossTo('/tour/estate', -1), null, 'the talk has a first screen');
+  assert.equal(crossTo('/tour/results', 1), null, 'and a last');
+  assert.equal(crossTo('/tour', 1), null);
+});
+
+test('presenter: the address a screen is entered at from behind is that screen\u2019s last beat', () => {
+  const inv = buildInventory();
+  const at = (i: number) => new URL(SCREENS[i].end, 'http://tour.test');
+  const page = (id: string) => readFileSync(new URL(`../src/routes/tour/${id}/+page.svelte`, import.meta.url), 'utf8');
+
+  // The estate: the colourings, and then the whole of it as the model is handed it.
+  assert.equal(at(0).searchParams.get('lens'), 'context');
+  assert.match(page('estate'), /const MODES: Mode\[\] = \[\.\.\.LENS_ORDER, 'context'\];/, 'context is the last of the estate\u2019s steps');
+  // The replay has no fixed length, so its address says "far enough" and the screen clamps it. Far enough is further than any of them.
+  const longest = Math.max(
+    ...TASK_ORDER.flatMap((task) => CATALOG_ROUTES[task].flatMap((r) => [undefined, 10, 1].map((batchSize) => lastFrame(replayCatalog({ task, route: r.id, batchSize }))))),
+  );
+  assert.ok(Number(at(1).searchParams.get('step')) > longest, `the longest replay ends at frame ${longest}`);
+  // Where it strains: the last beat.
+  assert.equal(Number(at(2).searchParams.get('at')), buildBeats(buildStrains(inv, buildToolRungs(inv))).length - 1);
+  // The language: the last rung is the code.
+  assert.equal(at(3).searchParams.get('rung'), 'code');
+  assert.match(page('language'), /\[\.\.\.RUNG_IDS\.filter\(\(id\) => id !== 'code'\), 'grow', 'limits', 'code'\]/, 'the code rung comes last');
+  // The object, the code surface and the results: the last step, the last beat of the last example, the last beat.
+  assert.equal(Number(at(4).searchParams.get('step')), LAST_STEP);
+  const lastExample = exampleBeats().at(-1)!;
+  assert.deepEqual(parseExampleState(at(5).searchParams), { id: lastExample.id, step: lastExample.step });
+  assert.equal(Number(at(5).searchParams.get('step')), lastExample.step, 'spelled out, so the address is not odd to look at');
+  assert.equal(parseResultsBeat(at(6).searchParams), RESULTS_BEATS.at(-1)!.id);
+});
+
+test('presenter keys: arrows, Page and Space step, Shift jumps a group, Home and End go to the ends', () => {
+  const key = (k: string, mods: Record<string, boolean> = {}) => beatActionFor({ key: k, ...mods });
+  assert.equal(key('ArrowRight'), 'next');
+  assert.equal(key('PageDown'), 'next');
+  assert.equal(key(' '), 'next');
+  assert.equal(key('ArrowLeft'), 'back');
+  assert.equal(key('PageUp'), 'back');
+  assert.equal(key(' ', { shiftKey: true }), 'back');
+  assert.equal(key('ArrowRight', { shiftKey: true }), 'group-next');
+  assert.equal(key('ArrowLeft', { shiftKey: true }), 'group-back');
+  assert.equal(key('Home'), 'first');
+  assert.equal(key('End'), 'last');
+  for (const mod of ['metaKey', 'ctrlKey', 'altKey']) assert.equal(key('ArrowRight', { [mod]: true }), null, `${mod} and an arrow is not a step`);
+  assert.equal(key('ArrowDown'), null, 'up and down are left to scrolling');
+  assert.equal(key('a'), null);
+});
+
+test('presenter keys: stepping past an end crosses to the next screen; a group is a run of steps with one name', () => {
+  const groups = ['a', 'a', 'a', 'b', 'b', 'c'];
+  const move = (action: BeatAction, at: number, g: readonly string[] = groups) => moveFor(action, at, g);
+  assert.deepEqual(move('next', 0), { to: 1 });
+  assert.deepEqual(move('next', 5), { cross: 1 });
+  assert.deepEqual(move('back', 3), { to: 2 });
+  assert.deepEqual(move('back', 0), { cross: -1 });
+  assert.deepEqual(move('first', 4), { to: 0 });
+  assert.equal(move('first', 0), null, 'Home on the first step has nowhere to go');
+  assert.deepEqual(move('last', 1), { to: 5 });
+  assert.equal(move('last', 5), null);
+  // Shift and right: the first step of the next group, from anywhere in this one.
+  assert.deepEqual(move('group-next', 0), { to: 3 });
+  assert.deepEqual(move('group-next', 2), { to: 3 });
+  assert.deepEqual(move('group-next', 3), { to: 5 });
+  assert.deepEqual(move('group-next', 5), { cross: 1 }, 'past the last group is the next screen');
+  // Shift and left: the start of this group, and from the start, the start of the one before.
+  assert.deepEqual(move('group-back', 2), { to: 0 });
+  assert.deepEqual(move('group-back', 4), { to: 3 });
+  assert.deepEqual(move('group-back', 3), { to: 0 });
+  assert.deepEqual(move('group-back', 5), { to: 3 });
+  assert.deepEqual(move('group-back', 0), { cross: -1 });
+  // One group is the whole screen; a name used twice with something between is two groups.
+  assert.deepEqual(move('group-next', 1, ['x', 'x', 'x']), { cross: 1 });
+  assert.deepEqual(move('group-next', 0, ['a', 'b', 'a']), { to: 1 });
+  assert.deepEqual(move('group-next', 1, ['a', 'b', 'a']), { to: 2 });
+  assert.deepEqual(move('group-back', 2, ['a', 'b', 'a']), { to: 1 });
+  // However it goes, it ends on a step that exists.
+  for (const action of ['next', 'back', 'group-next', 'group-back', 'first', 'last'] as const) {
+    for (let at = 0; at < groups.length; at += 1) {
+      const m = move(action, at);
+      if (m && 'to' in m) assert.ok(m.to >= 0 && m.to < groups.length && m.to !== at, `${action} from ${at} goes to ${m.to}`);
+    }
+  }
+});
+
+test('presenter keys: screens are Option or Alt with an arrow, Command or Control with Shift and an arrow, or the brackets', () => {
+  const key = (k: string, mods: Record<string, boolean> = {}) => globalActionFor({ key: k, ...mods });
+  assert.deepEqual(key('ArrowRight', { altKey: true }), { screen: 1 });
+  assert.deepEqual(key('ArrowLeft', { altKey: true }), { screen: -1 });
+  assert.deepEqual(key('ArrowRight', { metaKey: true, shiftKey: true }), { screen: 1 });
+  assert.deepEqual(key('ArrowLeft', { ctrlKey: true, shiftKey: true }), { screen: -1 });
+  assert.equal(key('ArrowRight', { metaKey: true }), null, 'Command and an arrow is the browser\u2019s history');
+  assert.equal(key('ArrowRight'), null, 'a plain arrow is the screen\u2019s own');
+  assert.equal(key('ArrowRight', { shiftKey: true }), null, 'Shift and an arrow is a jump of groups, on the screen');
+  assert.equal(key('ArrowRight', { altKey: true, metaKey: true }), null);
+  assert.deepEqual(key(']'), { screen: 1 });
+  assert.deepEqual(key('['), { screen: -1 });
+  assert.equal(key('p'), 'present');
+  assert.equal(key('P', { shiftKey: true }), 'present');
+  assert.equal(key('h'), 'help');
+  assert.equal(key('?', { shiftKey: true }), 'help');
+  assert.equal(key('f'), 'fullscreen');
+  assert.equal(key('Escape'), 'close');
+  assert.equal(key('p', { metaKey: true }), null, 'Command P is the browser\u2019s');
+  assert.equal(key('f', { ctrlKey: true }), null);
+  assert.equal(key('x'), null);
+});
+
+test('presenter keys: a key typed into a field belongs to the field', () => {
+  assert.equal(typingIn({ tagName: 'TEXTAREA' }), true);
+  assert.equal(typingIn({ tagName: 'INPUT' }), true);
+  assert.equal(typingIn({ tagName: 'SELECT' }), true);
+  assert.equal(typingIn({ tagName: 'DIV', isContentEditable: true }), true);
+  assert.equal(typingIn({ tagName: 'BUTTON' }), false);
+  assert.equal(typingIn({ tagName: 'BODY' }), false);
+  assert.equal(typingIn(null), false);
+});
+
+test('presenter mode: a link\u2019s own say-so comes first, then what was remembered, and reading when neither says', () => {
+  assert.equal(parseMode('present'), 'present');
+  assert.equal(parseMode('read'), 'read');
+  assert.equal(parseMode('PRESENT'), null);
+  assert.equal(parseMode(''), null);
+  assert.equal(parseMode(null), null);
+  assert.equal(modeOf(null, null), 'read');
+  assert.equal(modeOf(null, 'present'), 'present');
+  assert.equal(modeOf('read', 'present'), 'read', 'a link can turn it off');
+  assert.equal(modeOf('present', 'read'), 'present', 'and on');
+  assert.equal(modeOf('nonsense', 'present'), 'present', 'what is not a mode is not said');
+  assert.equal(modeOf(undefined, 'nonsense'), 'read');
+});
+
+test('presenter mode: every screen takes part in the keys, and hides its Back and Next row under one class', () => {
+  for (const s of SCREENS) {
+    const src = readFileSync(new URL(`../src/routes/tour/${s.id}/+page.svelte`, import.meta.url), 'utf8');
+    assert.ok(src.includes('<BeatNav') || src.includes('<BeatKeys'), `${s.id} has no step keys and does not tell the rail how far along it is`);
+    if (src.includes('<BeatNav')) assert.match(src, /<div class="nav">\s*<BeatNav/, `${s.id}: the BeatNav row must be .nav, the one class presenter mode hides`);
+  }
+  const nav = readFileSync(new URL('../src/lib/components/tour/TourNav.svelte', import.meta.url), 'utf8');
+  assert.match(nav, /<nav class="nav"/, 'the Back and Next pair is .nav too');
+  const css = readFileSync(new URL('../src/lib/components/tour/tour.css', import.meta.url), 'utf8');
+  assert.match(css, /\.tour\.present \.nav\s*\{\s*display: none !important;/, 'presenter mode hides every .nav');
+  assert.match(css, /\.tour\.present\s*\{[^}]*--tour-top: 0px;/, 'and gives the step bar\u2019s height back');
+  // The screen names that only orient a reader ("③ Where it strains") go too: the rail says where we are, and ③ needs the room at 820.
+  assert.match(css, /\.tour\.present \.t-chrome\s*\{\s*display: none;/, 'presenter mode hides what only orients a reader');
+  for (const [id, name] of [['strains', '③ Where it strains'], ['language', '④ A catalogue that grows a language']] as const) {
+    const src = readFileSync(new URL(`../src/routes/tour/${id}/+page.svelte`, import.meta.url), 'utf8');
+    assert.match(src, new RegExp(`<p class="t-kicker t-chrome">\\s*${name}`), `${id}: the screen name is the one kicker presenter mode hides`);
+  }
+});
+
+test('examples: each beat names its example as its group, so Shift and an arrow jump from one example to the next', () => {
+  const beats = exampleBeats();
+  assert.ok(beats.every((b) => b.group === b.id));
+  assert.deepEqual([...new Set(beats.map((b) => b.group))], EXAMPLES.map((e) => e.id));
+  const groups = beats.map((b) => b.group);
+  // From the middle of the tagging example, one jump forward is the first beat of the disks, and one back is the first of the tagging.
+  const tagStep = beats.findIndex((b) => b.id === 'tag' && b.step === 2);
+  assert.deepEqual(moveFor('group-next', tagStep, groups), { to: beats.findIndex((b) => b.id === 'disks' && b.step === 0) });
+  assert.deepEqual(moveFor('group-back', tagStep, groups), { to: beats.findIndex((b) => b.id === 'tag' && b.step === 0) });
 });
