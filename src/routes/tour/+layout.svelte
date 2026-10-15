@@ -30,7 +30,7 @@
     });
   });
   // Arriving at a workshop screen (a pasted link, say) makes it the workshop, and it stays the workshop: the rail would
-  // otherwise lose its extra screens the moment the talk moved on to one of the seven.
+  // otherwise lose its extra screens the moment the talk moved on to one of the eight.
   $effect(() => {
     const here = isWorkshopPath(page.url.pathname);
     untrack(() => {

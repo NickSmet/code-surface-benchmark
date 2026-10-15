@@ -27,7 +27,8 @@ import { CONTRACT_PROBES, TASK_ORDER, parseSolutionPrograms } from '../src/lib/t
 import { codeTouches, replayCode } from '../src/lib/tour/code-compare';
 import { PART_KEYS, billedAt, billedSplit, callSummary, costFacts, lastFrame, promptSplit, runBill, stepBadge, turnAt, turnFlow, turnResultTokens } from '../src/lib/tour/replay-view';
 import { clipLines, isJson, prettyJson, tokenizeJson } from '../src/lib/tour/json-highlight';
-import { answerFor, backToModelTokens, compareSurfaces, comparisonHeadline, comparisonLesson, groupDiff, outcomeCaption, probeResult, replayRun, seenBy } from '../src/lib/tour/code-view';
+import { answerFor, backToModelTokens, compareSurfaces, comparisonHeadline, comparisonLesson, groupDiff, outcomeCaption, probeResult, replayRun, seenBy, type Decision } from '../src/lib/tour/code-view';
+import { applyChangeRows } from '../src/lib/inventory/apply';
 import {
   FEATURES,
   FEATURE_IDS,
@@ -116,38 +117,82 @@ import {
 } from '../src/lib/tour/object-stage';
 import { contractExcerpt, programBlocks, shapeForDisplay, stepCopy, tokenizeLine, traceAccess, type CopyFacts } from '../src/lib/tour/object-trace';
 import {
+  ARMS,
   CODE,
   GROUPS,
   METHODS,
   MODELS,
+  MODEL_ORDER,
   NEXT_LABEL,
   OTHERS,
   REPORTED,
   RESULTS,
   RESULTS_BEATS,
   SOURCE,
+  TASK_SETS,
+  UNPLANNED_MODEL,
+  armsOn,
   buildResults,
+  cellIn,
   cellOf,
   cheapest,
+  cheapestRun,
+  chipHref,
   codeSpan,
+  fmtPrice,
   fmtTimes,
   fmtUsd,
   hostedSpan,
+  modelOf,
   multiples,
   nextCheapest,
+  othersOn,
   othersSpan,
+  parseResults,
   parseResultsBeat,
   perThousandRight,
+  perThousandRuns,
+  perfectOn,
+  planeStateOf,
+  priceDrop,
+  priceLine,
   resultsHref,
+  setCell,
   type ArmId,
+  type Cell,
   type ModelKey,
-  type ResultsBeatId
+  type ResultsBeatId,
+  type TaskSet
 } from '../src/lib/tour/results';
 import {
+  PLOT,
+  RESTS,
+  X_HI,
+  X_LO,
+  X_TICKS,
+  Y_MAX,
+  Y_MIN,
+  Y_TICKS,
+  fmtTick,
+  labelClashes,
+  labelsFor,
+  ladderFrac,
+  mixPose as mixMarker,
+  namedArms,
+  poseAt as markerAt,
+  poseOf,
+  presence,
+  textWidth,
+  trailOf,
+  wilson,
+  xOf,
+  yOf,
+  type Pose as Marker
+} from '../src/lib/tour/plane';
+import {
   ANSWER_WIDTH,
-  BREAK_START,
+  EDITABLE,
   EXAMPLES,
-  LAYER_LINE,
   MAX_ANSWER_LINES,
   PHASE_U,
   REVIEW_ROWS,
@@ -169,16 +214,50 @@ import {
   lineHeightFor,
   parseExampleState,
   probeFor,
-  probesOf,
   retBand,
   reviewAt,
   reviewCard,
   settledAt,
   sweepAt,
   wrapWords,
+  TOLD_LINES,
+  cursorOf,
+  execLinesOf,
+  flagAt,
+  toldCard,
+  toldLines,
   type ExampleDef,
   type ExampleId
 } from '../src/lib/tour/example-stage';
+import {
+  DECLINED_NOTE,
+  DROPPED_FIELDS,
+  GATES,
+  GUARD_BEATS,
+  GUARD_PANELS,
+  PRODUCTION_RULE,
+  PROGRAMS,
+  RULES,
+  applyApproved,
+  beatIndex,
+  beatOf,
+  buildGuard,
+  declinedContent,
+  evaluateRule,
+  evaluateRules,
+  execLinesFor,
+  flagsFor,
+  gateOf,
+  gateStates,
+  guardHref,
+  movedOn,
+  programOf,
+  refusedByRule,
+  stoppedAt,
+  type BeatId,
+  type GateId,
+  type ProgramId
+} from '../src/lib/tour/guard';
 
 const truth = computeGroundTruth(buildInventory());
 
@@ -2030,13 +2109,13 @@ const exBuild = (id: ExampleId) => {
   const strip = def.kind === 'task' && def.task ? billStrip(def.task, programs[def.task]) : undefined;
   return { def, src, outcome, view: buildExample({ def, program: src, outcome, inv: exInv, strip }) };
 };
-const runsOnItsOwn = EXAMPLES.filter((e) => e.kind !== 'break');
+const runsOnItsOwn = EXAMPLES;
 
-test('examples: nineteen beats in six examples, and each beat is a URL the screen reads back', () => {
+test('examples: sixteen beats in five examples, and each beat is a URL the screen reads back', () => {
   const beats = exampleBeats();
-  assert.equal(beats.length, 19);
-  assert.deepEqual(EXAMPLES.map((e) => [e.id, e.phases.length]), [['cost', 3], ['tag', 4], ['disks', 3], ['ratio', 3], ['lookup', 3], ['break', 3]]);
-  assert.equal(new Set(beats.map((b) => b.href)).size, 19, 'every beat has a URL of its own');
+  assert.equal(beats.length, 16);
+  assert.deepEqual(EXAMPLES.map((e) => [e.id, e.phases.length]), [['cost', 3], ['tag', 4], ['disks', 3], ['ratio', 3], ['lookup', 3]]);
+  assert.equal(new Set(beats.map((b) => b.href)).size, 16, 'every beat has a URL of its own');
   assert.equal(beats[0].href, '/tour/code', 'the screen opens on the first example, with no parameters');
   assert.equal(exampleHref('tag', 2), '/tour/code?ex=tag&step=2');
   for (const b of beats) {
@@ -2047,7 +2126,10 @@ test('examples: nineteen beats in six examples, and each beat is a URL the scree
   // Only the writing example has a review, and it comes last.
   assert.deepEqual(beats.filter((b) => b.phase === 'review').map((b) => b.id), ['tag']);
   assert.deepEqual(beats.filter((b) => b.id === 'tag').map((b) => b.phase), ['write', 'run', 'answer', 'review']);
-  assert.deepEqual(beats.filter((b) => b.id === 'break').map((b) => b.phase), ['see', 'change', 'do']);
+  // A program of the room's own is not one of this screen's examples: the screens that let a program be edited draw the same stage with it.
+  assert.ok(!EXAMPLES.some((e) => e.id === EDITABLE.id));
+  assert.equal(defOf(EDITABLE.id), EDITABLE);
+  assert.deepEqual(EDITABLE.phases, ['see', 'change', 'do']);
 });
 
 test('examples: whatever the URL says, the screen lands on a beat that exists', () => {
@@ -2058,7 +2140,7 @@ test('examples: whatever the URL says, the screen lands on a beat that exists', 
   assert.deepEqual(at('ex=tag&step=-1'), { id: 'tag', step: 0 });
   assert.deepEqual(at('ex=disks&step=abc'), { id: 'disks', step: 0 });
   assert.deepEqual(at('step=1.5'), { id: 'cost', step: 0 });
-  assert.deepEqual(at('ex=break&step=2'), { id: 'break', step: 2 });
+  assert.deepEqual(at('ex=break&step=2'), { id: 'cost', step: 2 }, 'the program of one\u2019s own moved to the guard screen: an old link lands on the first example');
 });
 
 test('examples: every program fits its panel, at a size that can be read from the back of a room', () => {
@@ -2217,14 +2299,9 @@ test('examples: the narration quotes the run it narrates, and no sentence is lef
   assert.match(exBuild('lookup').view.copy.answer ?? '', /A narrow tool would have done this too, and for less\./);
 });
 
-test('examples: each way to break a program is shown as the model would be told, and the loop is never run here', () => {
-  const def = defOf('break');
+test('examples: a program of one\u2019s own is shown as the model would be told, and the loop is never run here', () => {
+  const def = defOf(EDITABLE.id);
   assert.deepEqual(def.phases, ['see', 'change', 'do']);
-  for (const layer of ['see', 'change', 'do'] as const) {
-    assert.ok(probesOf(layer).length >= 1, layer);
-    assert.ok(probesOf(layer).some((p) => p.id === BREAK_START[layer]), `${layer} opens on one of its own probes`);
-    assert.ok(LAYER_LINE[layer].endsWith('.'));
-  }
   for (const p of CONTRACT_PROBES) {
     // The loop would hang a synchronous run: on the page it goes through the worker, here it is the worker's own answer.
     const outcome = /while \(true\)/.test(p.code)
@@ -2283,50 +2360,466 @@ test('examples: the motion places everything in order, and each beat rests where
   for (const b of exampleBeats()) assert.ok(PHASE_U[b.phase] >= 0 && PHASE_U[b.phase] <= 3);
 });
 
-// ── the results screen: the benchmark, from the newer models down to an older one ──
+// ── security and writes: the six gates ───────────────────────────────────────
+
+const gInv = buildInventory();
+const gProj = buildProjection(gInv);
+const gVms = gInv.resources.filter((r): r is VirtualMachine => r.type === 'virtualMachine');
+const gProd = gInv.subscriptions.find((s) => s.name === 'Production')!;
+const gRunning = gVms.filter((v) => v.powerState === 'running').sort((a, b) => b.costMonthly - a.costMonthly);
+const walkFiles = (dir: URL): string[] =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walkFiles(new URL(`${d.name}/`, dir)) : [new URL(d.name, dir).pathname]));
+const guardAddress = (href: string): URLSearchParams => new URL(href, 'http://tour.test').searchParams;
+
+/** A program through the gates the way the screen runs it. The program that never returns goes through the worker on the page: here it is the worker's own answer. */
+function guardOf(beat: BeatId, id: ProgramId, opts: { decision?: Decision; ruleOn?: boolean; inv?: typeof gInv } = {}) {
+  const p = PROGRAMS[id];
+  const inv = opts.inv ?? gInv;
+  const outcome = p.worker ? failedOutcome('timeout', 'Stopped after 1500 ms. The run took too long, so its worker was terminated.', 1500) : undefined;
+  return buildGuard({ beat, code: p.code, rationale: p.rationale, inv, projection: buildProjection(inv), decision: opts.decision, ruleOn: opts.ruleOn, outcome });
+}
+const sliceOf = (code: string, f: { line: number; col?: readonly [number, number] }): string => code.split('\n')[f.line].slice(f.col![0], f.col![1]);
+
+test('guard: six gates in the order a program meets them, five of them the benchmark\u2019s runtime and one of them the tour\u2019s', () => {
+  assert.deepEqual(GATES.map((g) => g.id), ['read', 'run', 'change', 'rule', 'review', 'apply']);
+  assert.deepEqual(GATES.filter((g) => g.home === 'yours').map((g) => g.id), ['rule'], 'only the rule is not in the runtime');
+  assert.ok(GATES.every((g) => g.says.endsWith('.') && g.label.length > 0));
+  assert.equal(gateOf('rule').home, 'yours');
+  assert.deepEqual(RULES, [PRODUCTION_RULE]);
+  assert.equal(PRODUCTION_RULE.text, 'No power-state change in Production without a person.');
+  assert.deepEqual([...DROPPED_FIELDS].sort(), ['_billingAccount', '_internalId']);
+  // The claim on the screen ("yours", not the runtime\u2019s) holds: no file the benchmark runs on has the rule.
+  for (const dir of ['agent', 'surfaces', 'inventory']) {
+    for (const file of walkFiles(new URL(`../src/lib/${dir}/`, import.meta.url))) {
+      assert.ok(!/production-power|No power-state change/.test(readFileSync(file, 'utf8')), `${file} does not have the rule`);
+    }
+  }
+  // The things the screen says the runtime does are in it: the whole proposal refused on one bad edit, the decline and the re-check as it lands.
+  const loop = readFileSync(new URL('../src/lib/agent/loop.ts', import.meta.url), 'utf8');
+  assert.ok(loop.includes(DECLINED_NOTE), 'the decline note is the loop\u2019s own');
+  assert.ok(loop.includes("status: 'not_applied'"), 'and so is the refusal when the apply fails');
+  assert.deepEqual(JSON.parse(declinedContent()), { status: 'declined', note: DECLINED_NOTE });
+});
+
+test('guard: the rule reads the change set the runtime derived, so it holds however the program was written', () => {
+  const top = gRunning.slice(0, 3);
+  assert.ok(top.every((v) => v.subscriptionId === gProd.id), 'the three most expensive running VMs are all in Production');
+  const reach = guardOf('rule', 'reach');
+  assert.equal(reach.raw.status, 'ok', 'valid for the contract: the runtime has nothing against it');
+  assert.equal(reach.raw.diff.length, 3);
+  assert.equal(reach.hit?.offenders.length, 3);
+  assert.equal(reach.hit?.total, 3);
+  assert.deepEqual(reach.hit!.offenders.map((r) => r.resourceName).sort(), top.map((v) => v.name).sort());
+  assert.match(reach.hit!.message, /^production-power: 3 of 3 changes set a power state in Production \(sql-host-0\d, sql-host-0\d, sql-host-0\d\)\. A person has to make those\. Nothing was applied\.$/);
+  // Refused whole, like any bad edit, and the model is told in the contract's own shape.
+  const refused = refusedByRule(reach.raw, reach.hit!);
+  assert.equal(refused.status, 'rejected');
+  assert.deepEqual(JSON.parse(refused.content), { error: reach.hit!.message });
+  assert.equal(refused.hasResult, false);
+  assert.deepEqual(Object.keys(refused.attempted).sort(), top.map((v) => v.id).sort());
+  assert.equal(reach.example.answer.tone, 'bad');
+  assert.equal(reach.example.answer.label, 'refused: what the model is told');
+  assert.equal(reach.endU, 2, 'nothing goes to a person');
+  assert.equal(reach.example.review, null);
+  // Narrowed to outside Production, the rule has nothing to say, and the three are the next most expensive.
+  const narrow = guardOf('review', 'narrow');
+  assert.equal(narrow.hit, null);
+  assert.deepEqual(narrow.raw.diff.map((r) => r.resourceName).sort(), gRunning.filter((v) => v.subscriptionId !== gProd.id).slice(0, 3).map((v) => v.name).sort());
+  assert.ok(narrow.raw.diff.every((r) => !top.some((t) => t.id === r.resourceId)));
+  // Turned off, the same program goes to a person.
+  const off = guardOf('rule', 'reach', { ruleOn: false });
+  assert.equal(off.hit, null);
+  assert.equal(off.endU, 3);
+  assert.equal(off.gates.rule, 'skip');
+  assert.equal(off.gates.review, 'hold');
+  assert.equal(off.example.review?.resources, 3);
+  // The rule reads rows, not text: another program, another way to say it, the same refusal; a tag in Production, or a power change outside it, passes.
+  const other = (code: string) => evaluateRules(RULES, run(code).diff, gProj);
+  const host = gVms.find((v) => v.subscriptionId === gProd.id && v.powerState === 'running')!;
+  const lab = gVms.find((v) => v.subscriptionId !== gProd.id && v.powerState === 'running')!;
+  assert.equal(other(`function main(data) {\n  data.resources.forEach((r) => {\n    if (r.name === '${host.name}') r['powerState'] = 'stopped';\n  });\n}`)?.offenders.length, 1);
+  assert.equal(other(`function main(data) {\n  const r = data.resources.find((x) => x.name === '${host.name}');\n  r.tags.reviewed = 'yes';\n}`), null);
+  assert.equal(other(`function main(data) {\n  const r = data.resources.find((x) => x.name === '${lab.name}');\n  r.powerState = 'stopped';\n}`), null);
+  assert.equal(other('function main(data) {\n  return 1;\n}'), null, 'a program that changes nothing has nothing to refuse');
+  assert.equal(evaluateRule(PRODUCTION_RULE, [], gProj), null);
+  const noProd = { ...gProj, subscriptions: gProj.subscriptions.filter((s) => s.name !== 'Production') };
+  assert.equal(evaluateRule(PRODUCTION_RULE, reach.raw.diff, noProd), null, 'with no Production there is nothing to protect');
+});
+
+test('guard: each program meets the gates the screen says it does, and stops at the first one that refuses it', () => {
+  type Gates = Partial<Record<GateId, string>>;
+  const expect: Array<[ProgramId, BeatId, Gates]> = [
+    ['read', 'read', { read: 'note', run: 'pass', change: 'skip', rule: 'skip', review: 'skip', apply: 'skip' }],
+    ['internal', 'read', { read: 'note', run: 'pass', change: 'skip' }],
+    ['network', 'run', { read: 'pass', run: 'stop', change: 'idle', rule: 'idle', review: 'idle', apply: 'idle' }],
+    ['loop', 'run', { read: 'pass', run: 'stop', change: 'idle' }],
+    ['change', 'change', { read: 'pass', run: 'pass', change: 'stop', rule: 'idle', review: 'idle' }],
+    ['tag-type', 'change', { run: 'pass', change: 'stop' }],
+    ['new-field', 'change', { run: 'pass', change: 'stop' }],
+    ['delete', 'change', { run: 'pass', change: 'stop' }],
+    ['tag', 'try', { run: 'pass', change: 'pass', rule: 'pass', review: 'hold', apply: 'idle' }],
+    ['reach', 'rule', { run: 'pass', change: 'pass', rule: 'stop', review: 'idle', apply: 'idle' }],
+    ['narrow', 'review', { run: 'pass', change: 'pass', rule: 'pass', review: 'hold', apply: 'idle' }]
+  ];
+  assert.deepEqual(expect.map(([id]) => id).sort(), Object.keys(PROGRAMS).sort(), 'every program is covered');
+  const stops: Record<ProgramId, GateId | null> = { read: null, internal: null, network: 'run', loop: 'run', change: 'change', 'tag-type': 'change', 'new-field': 'change', delete: 'change', tag: 'review', reach: 'rule', narrow: 'review' };
+  for (const [id, beat, gates] of expect) {
+    const v = guardOf(beat, id);
+    for (const [g, status] of Object.entries(gates)) assert.equal(v.gates[g as GateId], status, `${id}: ${g}`);
+    assert.equal(v.at, stops[id], `${id}: where it stops`);
+    // A refusal is the last gate that was reached: nothing after a stop was ever looked at.
+    const order = GATES.map((g) => v.gates[g.id]);
+    const stop = order.indexOf('stop');
+    if (stop >= 0) assert.ok(order.slice(stop + 1).every((s) => s === 'idle'), `${id}: nothing after the stop`);
+    // The lines flagged are lines of the program, one flag to a line, and only the program's own statements.
+    const lines = PROGRAMS[id].code.split('\n');
+    assert.equal(new Set(v.flags.map((f) => f.line)).size, v.flags.length, `${id}: one flag to a line`);
+    for (const f of v.flags) {
+      assert.ok(f.line >= 0 && f.line < lines.length && lines[f.line].trim() !== '', `${id}: flag on line ${f.line}`);
+      assert.ok(f.text.length > 0 && f.text.length <= 32, `${id}: "${f.text}" fits its pill`);
+      if (f.col) assert.ok(f.col[0] >= 0 && f.col[1] > f.col[0] && f.col[1] <= lines[f.line].length, `${id}: the underline is inside the line`);
+      assert.equal(f.col !== undefined, f.tone !== 'ok', `${id}: only what was refused or missing is underlined`);
+    }
+    assert.ok(v.stop === null || (v.stop >= 0 && v.stop < lines.length), `${id}: the cursor stops on a line`);
+    assert.ok(!/undefined|NaN|null|\[object|Infinity/.test(v.lead + v.ask), `${id}: ${v.lead}`);
+    assert.equal(v.ask, PROGRAMS[id].ask);
+    assert.ok(v.lead.length > 40 && v.lead.length <= 330, `${id}: ${v.lead.length} characters of narration`);
+  }
+});
+
+test('guard: what each refusal says, and the line it points at, are the runtime\u2019s own words and the program\u2019s own text', () => {
+  const flagsOf = (id: ProgramId, beat: BeatId = 'try') => guardOf(beat, id).flags.map((f) => [f.line, f.tone, f.text, f.at, f.col ? sliceOf(PROGRAMS[id].code, f) : null]);
+  // Read: what the projection left out is not an error, and it is not there. It is underlined where it was read, and said in the answer.
+  const read = guardOf('read', 'read');
+  assert.deepEqual(read.absent, ['_billingAccount']);
+  assert.deepEqual(flagsOf('read'), [[4, 'note', 'not in the projection', 'cursor', '_billingAccount']]);
+  assert.equal(read.raw.status, 'ok');
+  assert.deepEqual(JSON.parse(read.raw.content).result, { name: 'web-prod-03' }, 'the field is gone from the answer: nothing to read, nothing to leak');
+  assert.equal(read.example.answer.tone, 'note');
+  assert.equal(read.example.answer.foot, '_billingAccount is not in the result.\nNever in the object, so there was nothing to read.');
+  assert.equal(read.example.ret !== null, true, 'a program that finished reaches its return');
+  const internal = guardOf('read', 'internal');
+  assert.deepEqual(internal.absent, ['_internalId', '_billingAccount']);
+  assert.deepEqual(flagsOf('internal').map((f) => f[4]), ['_internalId', '_billingAccount']);
+  assert.match(internal.example.answer.foot!, /^_internalId and _billingAccount are not in the result\.\n/);
+  assert.ok(internal.example.answer.foot!.split('\n').every((l) => l.length <= ANSWER_WIDTH), 'each line of it fits the card');
+  assert.ok(PROGRAMS.internal.code.split('\n').every((l) => l.length <= 70), 'one statement to a line, so nothing runs off the panel');
+  // Run: no network, and a clock.
+  const net = guardOf('run', 'network');
+  assert.equal(net.raw.status, 'error');
+  assert.match(net.raw.error ?? '', /^fetch is not (a function|defined)$/);
+  assert.deepEqual(flagsOf('network'), [[2, 'bad', 'no network', 'cursor', 'fetch']]);
+  assert.equal(net.stop, 2);
+  assert.equal(net.example.ret, null, 'it never got to the return');
+  assert.equal(net.example.answer.label, 'error: what the model is told');
+  const loop = guardOf('run', 'loop');
+  assert.equal(loop.raw.status, 'timeout');
+  assert.deepEqual(flagsOf('loop'), [[1, 'bad', 'never returns', 'cursor', 'while (true)']]);
+  assert.equal(loop.example.answer.label, 'stopped: what the model is told');
+  assert.match(loop.raw.error!, /^Stopped after 1500 ms\./);
+  assert.match(loop.lead, /not a security boundary/);
+  assert.match(net.lead, /not a security boundary/);
+  // Change: the contract's strings, a flag on the line that broke it, and what was fine is dropped with the rest.
+  const change = guardOf('change', 'change');
+  assert.equal(change.raw.error, 'web-prod-03: costMonthly is read-only');
+  assert.deepEqual(flagsOf('change'), [
+    [3, 'bad', 'read-only', 'diff', 'costMonthly'],
+    [2, 'ok', 'allowed, dropped with the rest', 'diff', null]
+  ]);
+  assert.match(change.lead, /the valid tag change was dropped with it/);
+  assert.match(guardOf('change', 'tag-type').raw.error ?? '', /^Invalid tag monthly: keys must be supported and values must be strings/);
+  assert.deepEqual(flagsOf('tag-type', 'change').map((f) => f.slice(1, 4)), [['bad', 'tags are strings', 'diff']]);
+  assert.deepEqual(flagsOf('new-field', 'change').map((f) => f.slice(1, 4)), [['bad', 'cannot add a field', 'diff']]);
+  assert.deepEqual(flagsOf('delete', 'change').map((f) => f.slice(1, 4)), [['bad', 'cannot add or remove', 'diff']]);
+  // Rule, review: where a change set is refused by a rule, or goes on to a person.
+  assert.deepEqual(flagsOf('reach', 'rule').map((f) => [f[1], f[2], f[3], f[4]]), [['bad', '3 of 3 refused by your rule', 'diff', 'powerState']]);
+  assert.deepEqual(flagsOf('narrow', 'review').map((f) => [f[1], f[2], f[3], f[4]]), [['ok', 'goes to review', 'diff', null]]);
+  assert.deepEqual(flagsOf('tag').map((f) => [f[1], f[2]]), [['ok', 'goes to review']]);
+  // A comment is not code: the flag goes to the line that really does it.
+  const commented = ['function main(data) {', "  // vm._billingAccount would be the billing account", "  const vm = data.resources[0];", '  return vm._billingAccount;', '}'];
+  const out = run(commented.join('\n'));
+  assert.deepEqual(flagsFor(commented, out, gProj).flags.map((f) => f.line), [3]);
+});
+
+test('guard: a person decides, the decline is the loop\u2019s own note, and the estate is never touched', () => {
+  const before = JSON.stringify(gInv);
+  const pending = guardOf('review', 'narrow');
+  assert.equal(pending.gates.review, 'hold');
+  assert.equal(pending.told, null, 'nothing is told until somebody decides');
+  assert.equal(pending.applied, null);
+  assert.equal(pending.endU, 3);
+  assert.deepEqual(pending.example.review?.rows.map((r) => r.name), pending.raw.diff.map((r) => r.resourceName).filter((n, i, all) => all.indexOf(n) === i), 'a row for each resource, in the order the change set has them');
+  assert.equal(pending.example.review?.hidden, 0);
+  // Declined: the model is told not to retry, and nothing was written.
+  const declined = guardOf('review', 'narrow', { decision: 'declined' });
+  assert.equal(declined.gates.review, 'stop');
+  assert.equal(declined.gates.apply, 'idle');
+  assert.equal(declined.at, 'review');
+  assert.equal(declined.applied, null);
+  assert.equal(declined.told?.tone, 'quiet');
+  assert.equal(declined.told!.lines.join(' ').replace(/\s+/g, ' '), `status: "declined" note: "${DECLINED_NOTE}"`);
+  assert.match(declined.lead, /^Declined: nothing changed\. The model is told not to retry this change set/);
+  // Approved: the runtime's own write result goes back to the model, and the three resources carry the change in the copy.
+  const approved = guardOf('review', 'narrow', { decision: 'approved' });
+  assert.equal(approved.applied?.ok, true);
+  assert.equal(approved.applied?.content, approved.raw.content, 'the model reads what a write would have returned');
+  assert.equal(approved.told?.tone, 'ok');
+  assert.deepEqual(GATES.map((g) => approved.gates[g.id]), ['pass', 'pass', 'pass', 'pass', 'pass', 'pass']);
+  assert.equal(approved.example.marks.written.size, 3);
+  assert.match(approved.lead, /^Approved: the 3 resources now carry the change, in this copy of the estate\./);
+  assert.equal(JSON.stringify(gInv), before, 'the estate the screen was given is the estate it still has');
+  // The apply, run for real over a copy: the same change set lands on the estate it was derived from.
+  const copy = structuredClone(gInv);
+  applyChangeRows(copy, [...approved.raw.diff]);
+  for (const row of approved.raw.diff) assert.equal((copy.resources.find((r) => r.id === row.resourceId) as VirtualMachine).powerState, 'deallocated');
+  // A decision on a run with nothing to decide is no decision: nothing to review, nothing told.
+  const stopped = guardOf('review', 'network', { decision: 'approved' });
+  assert.equal(stopped.applied, null);
+  assert.equal(stopped.told, null);
+  assert.equal(guardOf('review', 'reach', { decision: 'approved' }).applied, null, 'a change set the rule refused never reaches a person');
+});
+
+test('guard: approval is not the end, because applying checks the proposal against the estate as it is now', () => {
+  const rows = guardOf('apply', 'narrow').raw.diff;
+  const moved = movedOn(gInv, rows);
+  assert.equal(moved.resource, 'ci-runner-04', 'while the change set waited, someone else dealt with the second VM');
+  assert.equal(moved.note, 'already deallocated');
+  assert.equal((moved.inv.resources.find((r) => r.name === 'ci-runner-04') as VirtualMachine).powerState, 'deallocated');
+  assert.equal((gInv.resources.find((r) => r.name === 'ci-runner-04') as VirtualMachine).powerState, 'running', 'the estate itself was not moved');
+  assert.deepEqual(movedOn(gInv, []).resource, '');
+  // The runtime's own apply refuses it, whole, in its own words; the unmoved estate takes it.
+  assert.throws(() => applyChangeRows(structuredClone(moved.inv), [...rows]), /Stale or invalid power-state change/);
+  assert.doesNotThrow(() => applyChangeRows(structuredClone(gInv), [...rows]));
+  // Before approval the person sees the diff as it was derived, with no hint of what has moved. After, the refused row says so.
+  const waiting = guardOf('apply', 'narrow');
+  assert.equal(waiting.movedOn, 'ci-runner-04');
+  assert.ok(waiting.example.review!.rows.every((r) => r.note === undefined), 'nothing in the diff gives the move away');
+  assert.equal(waiting.gates.apply, 'idle');
+  assert.match(waiting.lead, /someone else deallocated ci-runner-04\. Approve it, and see\.$/);
+  const refused = guardOf('apply', 'narrow', { decision: 'approved' });
+  assert.equal(refused.applied?.ok, false);
+  assert.equal(refused.applied?.error, 'Stale or invalid power-state change');
+  assert.deepEqual(JSON.parse(refused.applied!.content), { error: 'Stale or invalid power-state change', status: 'not_applied' });
+  assert.equal(refused.gates.review, 'pass');
+  assert.equal(refused.gates.apply, 'stop');
+  assert.equal(refused.at, 'apply');
+  assert.equal(refused.example.marks.written.size, 0, 'nothing was written, so nothing is drawn as written');
+  assert.deepEqual([...refused.example.marks.refused], [rows.find((r) => r.resourceName === 'ci-runner-04')!.resourceId]);
+  assert.deepEqual(refused.example.review!.rows.map((r) => [r.name, r.note]), [['ci-runner-02', undefined], ['ci-runner-04', 'already deallocated'], ['ci-runner-05', undefined]]);
+  assert.equal(refused.told?.tone, 'bad');
+  assert.equal(refused.told?.label, 'the model is told: not applied');
+  assert.match(refused.lead, /^Not applied\. The change set was derived from an estate that has since moved, so nothing was written\./);
+  // The same approval on the beat before it is not refused: the estate has not moved there.
+  assert.equal(guardOf('review', 'narrow', { decision: 'approved' }).applied?.ok, true);
+  assert.equal(applyApproved(gInv, rows, 'x').ok, true);
+  assert.equal(applyApproved(moved.inv, rows, 'x').ok, false);
+});
+
+test('guard: where each gate stands is a function of the run, the rule and the person, and nothing else', () => {
+  const ok = guardOf('rule', 'narrow').raw;
+  const flow = (over: Partial<Parameters<typeof gateStates>[0]> = {}) => ({ raw: ok, hit: null, ruleOn: true, absent: [], decision: 'pending' as Decision, applied: null, ...over });
+  const states = (over?: Parameters<typeof flow>[0]) => GATES.map((g) => gateStates(flow(over))[g.id]);
+  assert.deepEqual(states(), ['pass', 'pass', 'pass', 'pass', 'hold', 'idle']);
+  assert.deepEqual(states({ ruleOn: false }), ['pass', 'pass', 'pass', 'skip', 'hold', 'idle']);
+  assert.deepEqual(states({ absent: ['x'] }), ['note', 'pass', 'pass', 'pass', 'hold', 'idle']);
+  assert.deepEqual(states({ decision: 'declined' }), ['pass', 'pass', 'pass', 'pass', 'stop', 'idle']);
+  assert.deepEqual(states({ decision: 'approved' }), ['pass', 'pass', 'pass', 'pass', 'pass', 'idle'], 'approved and not yet applied');
+  assert.deepEqual(states({ decision: 'approved', applied: { ok: true, content: '{}' } }), ['pass', 'pass', 'pass', 'pass', 'pass', 'pass']);
+  assert.deepEqual(states({ decision: 'approved', applied: { ok: false, content: '{}', error: 'x' } }), ['pass', 'pass', 'pass', 'pass', 'pass', 'stop']);
+  const reach = guardOf('rule', 'reach');
+  assert.deepEqual(states({ raw: reach.raw, hit: reach.hit }), ['pass', 'pass', 'pass', 'stop', 'idle', 'idle']);
+  assert.deepEqual(states({ raw: { ...ok, status: 'rejected' } }), ['pass', 'pass', 'stop', 'idle', 'idle', 'idle']);
+  assert.deepEqual(states({ raw: { ...ok, status: 'error' } }), ['pass', 'stop', 'idle', 'idle', 'idle', 'idle']);
+  assert.deepEqual(states({ raw: { ...ok, status: 'timeout' } }), ['pass', 'stop', 'idle', 'idle', 'idle', 'idle']);
+  assert.deepEqual(states({ raw: { ...ok, diff: [] } }), ['pass', 'pass', 'skip', 'skip', 'skip', 'skip'], 'a program that only read has nothing for the later gates to check');
+  assert.equal(stoppedAt(gateStates(flow())), 'review', 'a person holding it is where it stands');
+  assert.equal(stoppedAt(gateStates(flow({ decision: 'approved', applied: { ok: true, content: '{}' } }))), null);
+});
+
+test('guard: seven beats, each a URL the screen reads back, each opening on the program that makes its own gate the interesting one', () => {
+  assert.deepEqual(GUARD_BEATS.map((b) => b.id), ['read', 'run', 'change', 'rule', 'review', 'apply', 'try']);
+  assert.deepEqual(GUARD_PANELS.map((b) => b.href), ['/tour/guard', ...[1, 2, 3, 4, 5, 6].map((i) => `/tour/guard?at=${i}`)]);
+  assert.equal(GUARD_PANELS.length, GUARD_BEATS.length);
+  for (const [i, b] of GUARD_BEATS.entries()) {
+    assert.equal(parseAt(guardAddress(GUARD_PANELS[i].href), GUARD_BEATS.length), i, b.id);
+    assert.equal(beatIndex(b.id), i);
+    assert.equal(guardHref(b.id), GUARD_PANELS[i].href);
+    assert.ok(b.variants.includes(b.start), `${b.id}: it opens on one of its own programs`);
+    assert.ok([b.start, ...b.variants].every((id) => PROGRAMS[id]), `${b.id}: the programs exist`);
+    assert.ok(b.caption.length > 0 && b.label.length > 0);
+  }
+  assert.equal(parseAt(new URLSearchParams('at=99'), GUARD_BEATS.length), 6, 'an address past the end is the last beat');
+  assert.deepEqual(new Set(GUARD_BEATS.flatMap((b) => b.variants)), new Set(Object.keys(PROGRAMS)), 'every program is on a beat, and no beat names one that is not');
+  // The program a beat opens on does what the beat is about.
+  const stopsAt = (b: BeatId): GateId | null => guardOf(b, beatOf(b).start).at;
+  assert.equal(stopsAt('read'), null, 'a read finishes, with something missing');
+  assert.equal(guardOf('read', 'read').gates.read, 'note');
+  assert.equal(stopsAt('run'), 'run');
+  assert.equal(stopsAt('change'), 'change');
+  assert.equal(stopsAt('rule'), 'rule');
+  assert.equal(stopsAt('review'), 'review');
+  assert.equal(guardOf('review', beatOf('review').start).gates.review, 'hold');
+  assert.equal(beatOf('apply').start, beatOf('review').start, 'the apply beat is the review beat\u2019s change set, a moment later');
+  assert.equal(guardOf('apply', beatOf('apply').start, { decision: 'approved' }).at, 'apply');
+  // The story carries on: the model is told the refusal and narrows, so the beat after the rule asks again.
+  assert.equal(PROGRAMS.narrow.ask.startsWith(PROGRAMS.reach.ask), true);
+  assert.match(PROGRAMS.narrow.ask, /has read the refusal, and tries again\.$/);
+  assert.equal(beatOf('apply').ask?.startsWith(PROGRAMS.reach.ask.replace(/\.$/, '')), true);
+  // Every program fits the panel, at a size that can be read from the back of a room.
+  for (const p of Object.values(PROGRAMS)) {
+    const lines = displayLines(p.code);
+    assert.ok(Math.max(...lines.map((l) => l.length)) <= 84, `${p.id}: the longest line is ${Math.max(...lines.map((l) => l.length))} characters`);
+    assert.ok(lineHeightFor(lines.length, Boolean(p.rationale)) >= 20, `${p.id}: ${lines.length} lines`);
+    assert.match(lines[0], /^function main\(/);
+    assert.equal(lines[lines.length - 1], '}');
+    assert.equal(programOf(p.code)?.id, p.id, 'a program on screen is recognised as the one it was loaded from');
+  }
+  assert.equal(programOf('function main(data) { return 1; }'), null);
+  assert.deepEqual(Object.values(PROGRAMS).filter((p) => p.worker).map((p) => p.id), ['loop'], 'only the program that never returns needs the worker\u2019s clock');
+  assert.deepEqual(execLinesFor(PROGRAMS.reach.code), [1, 6, 7, 9], 'the chain is one statement, the loop and its body are two, and the return is one');
+});
+
+test('guard: the cursor steps through a program\u2019s statements, a refusal waits for its turn, and a run that stopped stays where it stopped', () => {
+  const lines = PROGRAMS.reach.code.split('\n');
+  const exec = execLinesFor(PROGRAMS.reach.code);
+  assert.deepEqual(exec.map((i) => lines[i].trim()).slice(0, 2), ['const top = data.resources', "for (const vm of top) {"], 'a chain is one statement, and its dots are not');
+  assert.ok(exec.every((i) => !/^[}\])]+[;,]?$/.test(lines[i].trim()) && !lines[i].trim().startsWith('.')), 'no closing brace, no dot-line');
+  assert.deepEqual(execLinesOf(['function main(data) {', '  const a = 1;', '', '  return a;', '}'], [1, 3]), [1, 3], 'blank lines are not steps');
+  assert.equal(cursorOf(exec, null, U_START), null, 'before it runs, the cursor is nowhere');
+  assert.equal(cursorOf(exec, null, 0), null);
+  assert.equal(cursorOf(exec, null, 1), null, 'and once it has finished');
+  const seen = new Set<number>();
+  for (let u = 0.06; u < 0.85; u += 0.01) seen.add(cursorOf(exec, null, u)!);
+  assert.deepEqual([...seen].sort((a, b) => a - b), exec, 'every statement gets the cursor, in order');
+  // A run that stopped ends on the line it stopped at, and stays there.
+  const net = PROGRAMS.network.code.split('\n');
+  const netExec = execLinesFor(PROGRAMS.network.code);
+  assert.equal(cursorOf(netExec, 2, 1), 2);
+  assert.equal(cursorOf(netExec, 2, 3), 2);
+  assert.ok(net[2].includes('fetch'));
+  // A flag shows as the cursor reaches it, or once the program has returned and the runtime compares before and after.
+  const cursorFlag = { line: 2, tone: 'bad', text: 'no network', at: 'cursor' } as const;
+  const diffFlag = { line: 5, tone: 'bad', text: 'x', at: 'diff' } as const;
+  assert.equal(flagAt(cursorFlag, netExec, 2, U_START), 0);
+  assert.equal(flagAt(cursorFlag, netExec, 2, 1), 1);
+  assert.ok(flagAt(cursorFlag, netExec, 2, 0.7) > 0 && flagAt(cursorFlag, netExec, 2, 0.7) < 1, 'it comes in as the cursor arrives');
+  let last = 0;
+  for (let u = U_START; u <= 1.5; u += 0.02) {
+    const f = flagAt(cursorFlag, netExec, 2, u);
+    assert.ok(f >= last - 1e-12 && f >= 0 && f <= 1, `at ${u.toFixed(2)}: a flag only ever comes in`);
+    last = f;
+  }
+  assert.equal(flagAt(diffFlag, exec, null, 0.5), 0, 'a refusal of the change set waits for the program to return');
+  assert.equal(flagAt(diffFlag, exec, null, 1.2), 1);
+  const early = { line: exec[0], tone: 'note', text: 'x', at: 'cursor' } as const;
+  const late = { line: exec.at(-1)!, tone: 'note', text: 'x', at: 'cursor' } as const;
+  let u = 0;
+  while (flagAt(early, exec, null, u) < 0.5) u += 0.01;
+  let v = 0;
+  while (flagAt(late, exec, null, v) < 0.5) v += 0.01;
+  assert.ok(u < v, 'a line near the top shows before a line near the bottom');
+});
+
+test('guard: what the model is told once a person has decided is cut to the card, keys on as few lines as they fit', () => {
+  assert.equal(TOLD_LINES, 4);
+  assert.deepEqual(toldLines('{"status":"declined","note":"short"}'), ['status: "declined"  note: "short"']);
+  assert.deepEqual(toldLines('{"error":"x","status":"not_applied"}'), ['error: "x"  status: "not_applied"']);
+  assert.deepEqual(toldLines('{"a":1,"logs":[]}'), ['a: 1'], 'an empty log says nothing');
+  assert.deepEqual(toldLines('{"a":1,"logs":["x"]}'), ['a: 1  logs: ["x"]']);
+  const long = toldLines(JSON.stringify({ note: 'word '.repeat(60).trim() }));
+  assert.ok(long.length <= TOLD_LINES && long.every((l) => l.length <= 74), 'a long value wraps, and never wider than the card');
+  const many = toldLines(JSON.stringify(Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`key${i}`, 'value'.repeat(3)]))));
+  assert.equal(many.length, TOLD_LINES);
+  assert.ok(many.at(-1)!.endsWith('\u2026'), 'what does not fit is cut, and says so');
+  assert.deepEqual(toldLines('not json at all'), ['not json at all']);
+  assert.deepEqual(toldCard('{"a":1}', 'ok', 'the model is told'), { tone: 'ok', label: 'the model is told', lines: ['a: 1'] });
+});
+
+// ── the results screen: the benchmark, from an older model up to the newest ──
 
 const MODEL_KEYS = MODELS.map((m) => m.key);
 const SIX = METHODS.map((m) => m.id);
+const EIGHT = ARMS.map((a) => a.id);
+const SET_KEYS: TaskSet[] = ['preset', 'unplanned'];
 
-test('results: six methods on three models, eighty runs in every cell, and hosted calling on the newer two only', () => {
-  assert.deepEqual(MODEL_KEYS, ['newest', 'newer', 'older'], 'the strongest first: the screen turns the model down as it goes');
-  assert.deepEqual(MODELS.map((m) => m.deployment), ['gpt-6-luna', 'gpt-5.6-luna', 'gpt-5.4-mini']);
+test('results: eight methods on three models, forty runs in every cell of a set, and hosted calling on the newer two only', () => {
+  assert.deepEqual(MODEL_KEYS, ['older', 'newer', 'newest'], 'the weakest first: the screen walks the model up');
+  assert.deepEqual(MODEL_ORDER, MODEL_KEYS);
+  assert.deepEqual(MODELS.map((m) => m.deployment), ['gpt-5.4-mini', 'gpt-5.6-luna', 'gpt-6-luna']);
   assert.equal(SOURCE.tasks * SOURCE.repetitions, 80);
-  for (const m of MODEL_KEYS) {
-    for (const id of SIX) {
-      const c = cellOf(m, id);
-      assert.equal(c.runs, 80, `${m} ${id}`);
-      assert.ok(Number.isInteger(c.correct) && c.correct >= 0 && c.correct <= c.runs, `${m} ${id}`);
-      assert.ok(c.totalUsd > 0 && c.totalUsd < 1, `${m} ${id}: ${c.totalUsd}`);
+  assert.deepEqual(SOURCE.groups, { preset: 'core', unplanned: 'heldout' });
+  for (const set of SET_KEYS) {
+    for (const m of MODEL_KEYS) {
+      for (const id of SIX) {
+        const c = setCell(set, m, id);
+        assert.equal(c.runs, 40, `${set} ${m} ${id}: four tasks, ten runs each`);
+        assert.ok(Number.isInteger(c.correct) && c.correct >= 0 && c.correct <= c.runs, `${set} ${m} ${id}`);
+        assert.ok(c.totalUsd > 0 && c.totalUsd < 1, `${set} ${m} ${id}: ${c.totalUsd}`);
+      }
     }
   }
   const hosted: ArmId[] = ['naive-ptc-native', 'tuned-ptc-native'];
-  for (const m of ['newest', 'newer'] as const) for (const a of hosted) assert.equal(cellOf(m, a).runs, 80, `${m} ${a}`);
-  for (const a of hosted) assert.equal(RESULTS.older[a], undefined, `the oldest deployment rejects hosted calling: ${a}`);
+  for (const set of SET_KEYS) {
+    for (const m of ['newest', 'newer'] as const) for (const a of hosted) assert.equal(setCell(set, m, a).runs, 40, `${set} ${m} ${a}`);
+    for (const a of hosted) assert.equal(cellIn(set, 'older', a), undefined, `the oldest deployment rejects hosted calling: ${a}`);
+  }
   assert.deepEqual(hostedSpan(), { min: 79, max: 80 });
+  // The dollars beat's cells are the two sets added up, run for run and dollar for dollar.
+  for (const m of MODEL_KEYS) {
+    assert.deepEqual(Object.keys(RESULTS[m]).sort(), EIGHT.filter((a) => cellIn('preset', m, a)).sort());
+    for (const id of Object.keys(RESULTS[m]) as ArmId[]) {
+      const [a, b] = SET_KEYS.map((s) => setCell(s, m, id));
+      assert.deepEqual(cellOf(m, id), { runs: a.runs + b.runs, correct: a.correct + b.correct, totalUsd: a.totalUsd + b.totalUsd }, `${m} ${id}`);
+      assert.equal(cellOf(m, id).runs, 80);
+    }
+  }
+  assert.deepEqual(EIGHT, ['naive-direct', 'calc-direct', 'naive-ptc', 'naive-ptc-native', 'tuned-direct', 'tuned-ptc', 'tuned-ptc-native', 'code']);
+  assert.deepEqual(ARMS.filter((a) => !a.hosted).map((a) => a.id), SIX, 'the six that ran everywhere are the methods the dollars beat ranks');
+  assert.deepEqual(ARMS.filter((a) => a.hosted).map((a) => a.id), hosted);
+  assert.deepEqual(armsOn('older').map((a) => a.id), SIX);
+  assert.deepEqual(armsOn('newest').map((a) => a.id), EIGHT);
   assert.equal(OTHERS.length, 5);
   assert.ok(!OTHERS.includes(CODE));
   assert.deepEqual(Object.keys(GROUPS), ['catalogue', 'tuned', 'code']);
   assert.deepEqual(METHODS.map((m) => m.group), ['catalogue', 'catalogue', 'catalogue', 'tuned', 'tuned', 'code']);
+  assert.deepEqual(ARMS.map((a) => a.shape), ['circle', 'circle', 'diamond', 'ring', 'circle', 'diamond', 'ring', 'square'], 'the shape is how the tools are called: one by one, from a program, hosted');
+  assert.deepEqual(ARMS.map((a) => a.family), ['catalogue', 'calc', 'catalogue', 'catalogue', 'tuned', 'tuned', 'tuned', 'code'], 'the colour is the tool set');
+  assert.deepEqual(Object.keys(TASK_SETS), SET_KEYS);
 });
 
 test('results: the snapshot is the benchmark\'s own export, cell for cell, when the export is at hand', { skip: !existsSync(new URL('../' + SOURCE.file, import.meta.url)) }, () => {
   const file = JSON.parse(readFileSync(new URL('../' + SOURCE.file, import.meta.url), 'utf8')) as {
+    generatedAt: string;
+    prices: Array<{ model: ModelKey; deployment: string; inputPerM: number; cachedInputPerM: number; outputPerM: number }>;
     rows: Array<{ model: ModelKey; arm: ArmId; group: string; runs: number; correct: number; totalUsd: number }>;
   };
-  const all = file.rows.filter((r) => r.group === 'all');
-  const held = MODEL_KEYS.flatMap((m) => Object.keys(RESULTS[m]).map((a) => `${m}/${a}`));
-  assert.deepEqual([...held].sort(), all.map((r) => `${r.model}/${r.arm}`).sort(), 'the same cells, no more and no fewer');
-  for (const r of all) {
-    const c = cellOf(r.model, r.arm);
-    assert.equal(c.runs, r.runs, `${r.model} ${r.arm}: runs`);
-    assert.equal(c.correct, r.correct, `${r.model} ${r.arm}: correct`);
-    assert.ok(Math.abs(c.totalUsd - r.totalUsd) < 1e-7, `${r.model} ${r.arm}: ${c.totalUsd} against ${r.totalUsd}`);
+  assert.equal(file.generatedAt, SOURCE.generatedAt);
+  const held: Array<[string, (m: ModelKey, a: ArmId) => Cell | undefined]> = [
+    [SOURCE.groups.preset, (m, a) => cellIn('preset', m, a)],
+    [SOURCE.groups.unplanned, (m, a) => cellIn('unplanned', m, a)],
+    ['all', (m, a) => RESULTS[m][a]]
+  ];
+  for (const [group, cell] of held) {
+    const rows = file.rows.filter((r) => r.group === group);
+    const ours = MODEL_KEYS.flatMap((m) => EIGHT.filter((a) => cell(m, a)).map((a) => `${m}/${a}`));
+    assert.deepEqual([...ours].sort(), rows.map((r) => `${r.model}/${r.arm}`).sort(), `${group}: the same cells, no more and no fewer`);
+    for (const r of rows) {
+      const c = cell(r.model, r.arm)!;
+      assert.equal(c.runs, r.runs, `${group} ${r.model} ${r.arm}: runs`);
+      assert.equal(c.correct, r.correct, `${group} ${r.model} ${r.arm}: correct`);
+      assert.ok(Math.abs(c.totalUsd - r.totalUsd) < 1e-7, `${group} ${r.model} ${r.arm}: ${c.totalUsd} against ${r.totalUsd}`);
+    }
+  }
+  assert.deepEqual(file.prices.map((p) => p.model).sort(), [...MODEL_KEYS].sort());
+  for (const p of file.prices) {
+    const m = modelOf(p.model);
+    assert.equal(m.deployment, p.deployment);
+    assert.deepEqual(m.price, { input: p.inputPerM, cached: p.cachedInputPerM, output: p.outputPerM }, `${p.model}: the price sheet the dollars were computed with`);
   }
 });
 
-test('results: dollars per 1,000 right answers print the way the benchmark\'s report prints them', () => {
-  // The table of section 1.4 of docs/ptc-matrix-results.md, by model, in the screen's row order.
+test('results: dollars print the way the benchmark\'s report prints them, and prices the way the vendors do', () => {
+  // The table of section 1.4 of docs/ptc-matrix-results.md: dollars per 1,000 right answers over all eight tasks, in the screen's row order.
   const printed: Record<ModelKey, string[]> = {
     older: ['$18.7', '$13.8', '$4.09', '$6.46', '$5.63', '$2.66'],
     newer: ['$3.22', '$3.41', '$0.838', '$2.00', '$0.949', '$0.744'],
@@ -2337,25 +2830,51 @@ test('results: dollars per 1,000 right answers print the way the benchmark\'s re
   assert.equal(fmtUsd(perThousandRight(cellOf('newest', 'tuned-ptc-native'))), '$0.539');
   assert.equal(fmtUsd(Infinity), '\u2013', 'a method with no right answers has no price per right answer');
   assert.equal(perThousandRight({ runs: 80, correct: 0, totalUsd: 1 }), Infinity);
+  assert.ok(Math.abs(perThousandRuns({ runs: 40, correct: 0, totalUsd: 0.1 }) - 2.5) < 1e-12, 'the plane ranks per run, right or wrong');
   assert.equal(fmtTimes(65.39), '65.4\u00d7');
   assert.equal(fmtTimes(13.33), '13.3\u00d7');
   assert.equal(fmtTimes(4.9048), '4.90\u00d7');
   assert.equal(fmtTimes(120.4), '120\u00d7');
+  assert.deepEqual(MODEL_KEYS.map(priceLine), [
+    '$0.75 in \u00b7 $0.075 cached \u00b7 $4.50 out, per 1M tokens',
+    '$0.20 in \u00b7 $0.02 cached \u00b7 $1.20 out, per 1M tokens',
+    '$0.10 in \u00b7 $0.01 cached \u00b7 $0.50 out, per 1M tokens'
+  ]);
+  assert.deepEqual([fmtPrice(0.075), fmtPrice(0.1), fmtPrice(4.5)], ['$0.075', '$0.10', '$4.50'], 'two decimals at least, and as many more as the figure needs');
+  assert.deepEqual(priceDrop('older'), { min: 1, max: 1 });
+  assert.deepEqual(priceDrop('newer'), { min: 3.75, max: 3.75 });
+  assert.deepEqual(priceDrop('newest'), { min: 7.5, max: 9 });
 });
 
 test('results: the claims the screen makes hold for the cells they are read from', () => {
-  // The code surface is right every time, on every model, and the other methods are not: the screen's thesis.
-  for (const m of MODEL_KEYS) assert.equal(cellOf(m, CODE).correct, 80, `${m}: the code surface`);
+  const n = 40;
+  // The code surface is right every time, on every model and on both sets of tasks: the screen's thesis.
+  for (const set of SET_KEYS) for (const m of MODEL_KEYS) assert.equal(setCell(set, m, CODE).correct, n, `${set} ${m}: the code surface`);
   assert.deepEqual(codeSpan(MODEL_KEYS), { min: 80, max: 80 });
-  assert.deepEqual(othersSpan(['older']), { min: 39, max: 56 }, 'the older model breaks every other method');
-  assert.deepEqual(othersSpan(['newer', 'newest']), { min: 76, max: 80 }, 'the newer models nearly hold them');
+  // The other methods fall with the model. The older model breaks every one of them on the preset tasks, the newer two nearly hold them.
+  assert.deepEqual(othersOn('preset', 'older').correct, { min: 21, max: 30 });
+  assert.deepEqual(othersOn('preset', 'newer').correct, { min: 36, max: 40 });
+  assert.deepEqual(othersOn('preset', 'newest').correct, { min: 36, max: 40 });
+  assert.deepEqual(perfectOn('preset', 'older'), [CODE], 'on the older model only the code surface reaches the top');
+  assert.deepEqual(perfectOn('preset', 'newer').sort(), ['code', 'tuned-ptc', 'tuned-ptc-native']);
+  assert.equal(perfectOn('preset', 'newest').length, 5, 'on the newest, five methods are right every time, so price decides');
+  assert.deepEqual(othersSpan(['older']), { min: 39, max: 56 }, 'over all eight tasks the older model breaks every other method');
+  assert.deepEqual(othersSpan(['newer', 'newest']), { min: 76, max: 80 });
   for (const id of OTHERS) assert.ok(cellOf('older', id).correct < 60, `older ${id}`);
-  // And it is the cheapest way to a right answer on all three, which the dollars beat says.
+
+  // The narrative the plane tells. Where the tuned catalogue is designed for the question, it is as cheap as it gets: on the older model by a hair,
+  // on the newer by more, and the code surface is the cheapest again only on the newest.
+  const cheap = (set: TaskSet, m: ModelKey) => cheapestRun(set, m);
+  assert.deepEqual([cheap('preset', 'older').id, fmtUsd(cheap('preset', 'older').usd), fmtUsd(perThousandRuns(setCell('preset', 'older', CODE)))], ['tuned-direct', '$2.55', '$2.57']);
+  assert.deepEqual([cheap('preset', 'newer').id, fmtUsd(cheap('preset', 'newer').usd), fmtUsd(perThousandRuns(setCell('preset', 'newer', CODE)))], ['tuned-direct', '$0.729', '$0.777']);
+  assert.deepEqual([cheap('preset', 'newest').id, fmtUsd(cheap('preset', 'newest').usd)], [CODE, '$0.278']);
+  assert.equal(cheap('preset', 'newer').correct, 39, 'and what it saves is paid for in a wrong answer');
+  // On questions nobody planned for, the code surface is the cheapest on all three, and still right every time.
+  for (const m of MODEL_KEYS) assert.equal(cheap('unplanned', m).id, CODE, `${m}: cheapest on the unplanned tasks`);
+  // Over all eight tasks, per right answer, it is the cheapest on all three too, which the dollars beat says.
   for (const m of MODEL_KEYS) assert.equal(cheapest(m).id, CODE, `${m}: cheapest right answer`);
   assert.deepEqual([nextCheapest('newest').id, fmtUsd(nextCheapest('newest').usd)], ['naive-ptc', '$0.387']);
   assert.deepEqual([nextCheapest('older').id, nextCheapest('older').correct], ['naive-ptc', 56]);
-  // Accuracy ties on the strongest model: nobody is below 76, and the code surface is not above 80.
-  assert.ok(othersSpan(['newest']).min >= 76);
   // The two effects multiply into the whole, exactly, and they are the figures the report quotes.
   const x = multiples();
   assert.ok(Math.abs(x.model * x.method - x.both) < 1e-9, 'model \u00d7 method = both');
@@ -2364,54 +2883,121 @@ test('results: the claims the screen makes hold for the cells they are read from
   assert.equal(REPORTED.newestSmallestP, 0.12);
 });
 
-test('results: four beats, each a URL the screen reads back, and each with the sentence and the figures that belong to it', () => {
-  assert.deepEqual(RESULTS_BEATS.map((b) => b.id), ['newer', 'older', 'dollars', 'why']);
-  assert.deepEqual(RESULTS_BEATS.map((b) => b.href), ['/tour/results', '/tour/results?show=older', '/tour/results?show=dollars', '/tour/results?show=why']);
+test('results: six beats, each a URL the screen reads back, the models in walking order, and the unplanned tasks turned to any of them', () => {
+  assert.deepEqual(RESULTS_BEATS.map((b) => b.id), ['older', 'newer', 'newest', 'unplanned', 'dollars', 'why']);
+  assert.deepEqual(RESULTS_BEATS.map((b) => b.href), [
+    '/tour/results',
+    '/tour/results?show=newer',
+    '/tour/results?show=newest',
+    '/tour/results?show=unplanned',
+    '/tour/results?show=dollars',
+    '/tour/results?show=why'
+  ]);
   for (const b of RESULTS_BEATS) {
     assert.equal(parseResultsBeat(new URL(b.href, 'http://tour.test').searchParams), b.id, b.href);
     assert.equal(resultsHref(b.id), b.href);
     assert.ok(NEXT_LABEL[b.id].length > 0);
+    assert.ok(b.caption.length > 0);
   }
-  assert.equal(parseResultsBeat(new URLSearchParams('show=nope')), 'newer', 'an unknown beat is the first');
-  assert.equal(parseResultsBeat(new URLSearchParams('')), 'newer');
+  assert.deepEqual(RESULTS_BEATS.slice(0, 3).map((b) => b.caption), MODELS.map((m) => m.deployment), 'the first three beats are a model each, named as the benchmark names it');
+  assert.equal(parseResultsBeat(new URLSearchParams('show=nope')), 'older', 'an unknown beat is the first');
+  assert.equal(parseResultsBeat(new URLSearchParams('')), 'older');
+  // A model beat is about its model. The unplanned tasks open on the newest and can be turned to the others. Nothing else is about one model.
+  const at = (qs: string) => parseResults(new URLSearchParams(qs));
+  assert.deepEqual(at(''), { beat: 'older', model: 'older' });
+  assert.deepEqual(at('show=newer&model=older'), { beat: 'newer', model: 'newer' }, 'a model beat does not take a model from the address');
+  assert.deepEqual(at('show=unplanned'), { beat: 'unplanned', model: UNPLANNED_MODEL });
+  assert.equal(UNPLANNED_MODEL, 'newest', 'the walk has just ended there');
+  assert.deepEqual(at('show=unplanned&model=older'), { beat: 'unplanned', model: 'older' });
+  assert.deepEqual(at('show=unplanned&model=nope'), { beat: 'unplanned', model: UNPLANNED_MODEL });
+  assert.equal(at('show=dollars&model=older').model, UNPLANNED_MODEL);
+  assert.equal(resultsHref('unplanned', 'newest'), '/tour/results?show=unplanned', 'the model the beat opens on needs no say-so');
+  assert.equal(resultsHref('unplanned', 'older'), '/tour/results?show=unplanned&model=older');
+  assert.equal(resultsHref('newer', 'older'), '/tour/results?show=newer', 'a model is only ever named on the unplanned tasks');
+  // The chips in the plane's header lead to the place they name, and back again.
+  for (const m of MODEL_KEYS) {
+    for (const set of SET_KEYS) {
+      const state = parseResults(new URL(chipHref(m, set), 'http://tour.test').searchParams);
+      assert.deepEqual(planeStateOf(state), { model: m, set }, `${m} ${set}`);
+    }
+  }
+  assert.equal(planeStateOf(at('show=dollars')), null, 'the ladder and the reasons are not the plane');
+  assert.equal(planeStateOf(at('show=why')), null);
+});
 
+test('results: each beat has the sentence and the figures that belong to it, and no figure is left half-made', () => {
   const views = Object.fromEntries(RESULTS_BEATS.map((b) => [b.id, buildResults(b.id)])) as Record<ResultsBeatId, ReturnType<typeof buildResults>>;
   for (const b of RESULTS_BEATS) {
     const v = views[b.id];
-    assert.equal(v.panels.length, 3);
-    assert.deepEqual(v.panels.map((p) => p.model), MODEL_KEYS);
-    assert.ok(v.lead.length > 60 && v.lead.length <= 230, `${b.id}: ${v.lead.length} characters is two lines of narration, not three`);
-    assert.ok(!/undefined|NaN|null|\[object|Infinity/.test(v.lead + JSON.stringify(v.tiles ?? []) + JSON.stringify(v.columns ?? []) + v.footnote), b.id);
+    assert.equal(v.beat, b.id);
+    assert.equal(v.stage, b.id === 'dollars' ? 'ladder' : b.id === 'why' ? 'why' : 'plane');
+    assert.equal(v.plane !== null && v.table !== null, v.stage === 'plane', `${b.id}: the plane and its table go together`);
+    assert.equal(v.ladder !== null, v.stage === 'ladder');
+    assert.equal(v.columns !== null, v.stage === 'why');
     assert.equal(v.tiles !== null, b.id !== 'why', `${b.id}: figures, or the reasons`);
-    assert.equal(v.columns !== null, b.id === 'why');
+    assert.ok(v.lead.length > 60 && v.lead.length <= 290, `${b.id}: ${v.lead.length} characters is two or three lines of narration, not four`);
+    assert.ok(!/undefined|NaN|null|\[object|Infinity/.test(v.lead + JSON.stringify(v.tiles ?? []) + JSON.stringify(v.columns ?? []) + JSON.stringify(v.ladder ?? []) + v.footnote), b.id);
+    assert.equal(v.aria.length > 0, v.stage === 'plane', `${b.id}: a screen reader gets the plane in words`);
+    for (const t of v.tiles ?? []) assert.ok(t.value.length <= (t.compact ? 30 : 16), `${b.id}: "${t.value}" is a figure, so it fits a tile; a name is set small`);
   }
-  // What has been introduced, and what the beat is about.
-  assert.deepEqual(views.newer.panels.map((p) => p.revealed), [true, true, false], 'the older model is held back for the second beat');
-  assert.deepEqual(views.older.panels.map((p) => p.revealed), [true, true, true]);
-  assert.deepEqual(views.newer.panels.map((p) => p.focus), [true, true, false]);
-  assert.deepEqual(views.older.panels.map((p) => p.focus), [false, false, true]);
-  assert.deepEqual(views.dollars.panels.map((p) => p.focus), [true, true, true]);
-  assert.deepEqual(views.why.panels.map((p) => p.focus), [false, false, false]);
-  assert.deepEqual(RESULTS_BEATS.map((b) => views[b.id].emphasis), ['accuracy', 'accuracy', 'dollars', 'accuracy']);
-  assert.match(views.newer.lead, /the other five get 76 to 80 of 80 right, and the code surface gets 80/);
-  assert.match(views.older.lead, /gpt-5\.4-mini\. The code surface is still at 80 of 80\. The other five methods fall to between 39 and 56\./);
-  assert.match(views.dollars.lead, /the cheapest on all three models/);
+  assert.deepEqual(['older', 'newer', 'newest'].map((id) => views[id as ResultsBeatId].plane), [
+    { model: 'older', set: 'preset' },
+    { model: 'newer', set: 'preset' },
+    { model: 'newest', set: 'preset' }
+  ]);
+  assert.deepEqual(views.unplanned.plane, { model: 'newest', set: 'unplanned' });
+  // What is said at each of the three model beats is the cells' own.
+  assert.match(views.older.lead, /^An older model, gpt-5\.4-mini, on the four preset tasks\. Only the code surface reaches the top: 40 of 40 right\. The other five get 21 to 30, at \$2\.55 to \$6\.02 per 1,000 runs against its \$2\.57\.$/);
+  assert.match(views.newer.lead, /^gpt-5\.6-luna costs 3\.75 times less per token, so everything moves left, and it does the work better, so everything moves up\./);
+  assert.match(views.newer.lead, /The code surface is no longer the cheapest: the tuned catalogue, called one by one, is 6% under it, at 39 of 40\. The code surface is still at 40 of 40\.$/);
+  assert.match(views.newest.lead, /^gpt-6-luna costs 7\.5 to 9 times less per token than the older model\. Five methods now get 40 of 40, so price decides, and the code surface is the cheapest again: \$0\.278 per 1,000 runs against \$0\.337 for the next\.$/);
+  assert.match(views.unplanned.lead, /^The same gpt-6-luna on four questions written after the tool sets were frozen\. Tuned catalogue, one by one, the cheapest other method on the preset tasks, goes from \$0\.337 to \$1\.37 per 1,000 runs: 4\.05\u00d7\. The code surface goes from \$0\.278 to \$0\.293, and still gets 40 of 40\.$/);
+  assert.match(views.dollars.lead, /the code surface is the cheapest on all three models/);
   assert.match(views.why.lead, /^A reading, not a measurement/);
-  assert.match(views.newer.footnote, /Hosted programmatic calling, run on the two newer models only, got 79 to 80 of 80/);
-  assert.match(views.newer.footnote, /80 runs a bar: 8 tasks, 10 runs each/);
+  assert.match(views.older.footnote, /^40 runs a marker: 4 tasks, 10 runs each\./);
+  assert.match(views.older.footnote, /Rings are hosted programmatic calling, run on the two newer models only\.$/);
+  assert.match(views.dollars.footnote, /^80 runs a bar: 8 tasks, 10 runs each\./);
+  assert.match(views.dollars.footnote, /Hosted programmatic calling, run on the two newer models only, got 79 to 80 of 80 and is left out\.$/);
 });
 
 test('results: each beat\'s figures are the cells they quote', () => {
-  const tiles = (id: ResultsBeatId) => buildResults(id).tiles!.map((t) => [t.label, t.value]);
-  assert.deepEqual(tiles('newer'), [['Code surface', '80 of 80'], ['The other five', '76\u201380 of 80'], ['Cheapest right answer', 'Code surface']]);
-  assert.deepEqual(tiles('older'), [['Code surface', '80 of 80'], ['The other five', '39\u201356 of 80'], ['Cheapest right answer', 'Code surface']]);
-  assert.match(buildResults('newer').tiles![2].sub, /\$0\.286 and \$0\.744 per 1,000 right answers\. Next cheapest: \$0\.387 and \$0\.838\./);
-  assert.match(buildResults('older').tiles![2].sub, /\$2\.66 per 1,000 right answers\. Next cheapest: \$4\.09, at 56 of 80\./);
+  const tiles = (id: ResultsBeatId, model?: ModelKey) => buildResults(id, model).tiles!.map((t) => [t.label, t.value]);
+  assert.deepEqual(tiles('older'), [['Code surface', '40 of 40'], ['The other five', '21\u201330 of 40'], ['Cheapest per run', 'Tuned catalogue, one by one']]);
+  assert.deepEqual(tiles('newer'), [['Code surface', '40 of 40'], ['The other seven', '36\u201340 of 40'], ['Cheapest per run', 'Tuned catalogue, one by one']]);
+  assert.deepEqual(tiles('newest'), [['Code surface', '40 of 40'], ['The other seven', '36\u201340 of 40'], ['Cheapest per run', 'Code surface']]);
+  assert.equal(buildResults('older').tiles![0].sub, 'right, at $2.57 per 1,000 runs');
+  assert.equal(buildResults('older').tiles![1].sub, 'right, at $2.55 to $6.02 per 1,000 runs');
+  assert.equal(buildResults('older').tiles![2].sub, '$2.55 per 1,000 runs, 30 of 40 right. The code surface: $2.57, 40 of 40.');
+  assert.equal(buildResults('newer').tiles![2].sub, '$0.729 per 1,000 runs, 39 of 40 right. The code surface: $0.777, 40 of 40.');
+  assert.equal(buildResults('newest').tiles![2].sub, '$0.278 per 1,000 runs. Next: tuned catalogue, one by one, $0.337, 21% more.');
+  assert.deepEqual(buildResults('older').tiles!.map((t) => t.tone), ['code', 'catalogue', 'ink']);
+  assert.ok(buildResults('older').tiles![2].compact, 'the cheapest is a name, so it is set small');
+  // The unplanned tasks, on each model: what the best other method did, what the code surface did, and who is cheapest.
+  assert.deepEqual(tiles('unplanned'), [['Tuned catalogue, one by one', '$0.337 \u2192 $1.37'], ['Code surface', '$0.278 \u2192 $0.293'], ['Cheapest on unplanned tasks', 'Code surface']]);
+  assert.equal(buildResults('unplanned').tiles![0].sub, 'per 1,000 runs, preset to unplanned: 4.05\u00d7. Right: 40 of 40 on both.');
+  assert.equal(buildResults('unplanned').tiles![1].sub, 'per 1,000 runs: 5% more. Right: 40 of 40 on both.');
+  assert.deepEqual(tiles('unplanned', 'older').map((t) => t[1]), ['$2.55 \u2192 $6.18', '$2.57 \u2192 $2.74', 'Code surface']);
+  assert.equal(buildResults('unplanned', 'older').tiles![0].sub, 'per 1,000 runs, preset to unplanned: 2.43\u00d7. Right: 30 of 40 on the preset tasks, 24 on these.', 'a method that is not as right on the second set says so');
+  assert.deepEqual(tiles('unplanned', 'newer').map((t) => t[1]), ['$0.729 \u2192 $3.18', '$0.777 \u2192 $0.711', 'Code surface']);
+  assert.equal(buildResults('unplanned', 'newer').tiles![1].sub, 'per 1,000 runs: 8% less. Right: 40 of 40 on both.', 'it can get cheaper too, and the tile says less');
+  assert.match(buildResults('unplanned', 'older').lead, /^The same gpt-5\.4-mini on four questions/);
+  assert.equal(buildResults('unplanned', 'older').plane?.model, 'older');
+  // What a right answer costs: the model, the method, and both.
   assert.deepEqual(tiles('dollars'), [['The model alone', '13.3\u00d7'], ['The method alone', '4.90\u00d7'], ['Both together', '65.4\u00d7']]);
   assert.deepEqual(buildResults('dollars').tiles!.map((t) => t.op), [undefined, '\u00d7', '='], 'read as a sum');
   assert.match(buildResults('dollars').tiles![2].sub, /gpt-6-luna with the code surface, \$0\.286, against gpt-5\.4-mini with one-by-one catalogue calls, \$18\.7/);
   assert.match(buildResults('dollars').tiles![0].sub, /77 right instead of 39/);
   assert.match(buildResults('dollars').tiles![1].sub, /80 right instead of 77/);
+  assert.deepEqual(buildResults('dollars').ladder!.map((r) => [r.id, r.sub, r.usd, r.tone]), [
+    ['older-catalogue', '39 of 80 right', '$18.7', 'catalogue'],
+    ['newest-catalogue', '77 of 80 right', '$1.40', 'catalogue'],
+    ['newest-code', '80 of 80 right', '$0.286', 'code']
+  ]);
+  for (const r of buildResults('dollars').ladder!) {
+    const f = ladderFrac(r.usdValue);
+    assert.ok(f > 0 && f < 1, `${r.id}: the bar fits the axis`);
+  }
+  assert.ok(ladderFrac(0.286) < ladderFrac(1.4) && ladderFrac(1.4) < ladderFrac(18.7), 'the bars run in the order the prices do');
   // The reasons name the figures they rest on, and mark which of them were measured.
   const [why, limits] = buildResults('why').columns!;
   assert.deepEqual(why.points.map((p) => p.measured), [false, false, true]);
@@ -2419,38 +3005,149 @@ test('results: each beat\'s figures are the cells they quote', () => {
   assert.equal(limits.tagged, false);
   assert.match(why.points[2].text, /gpt-5\.4-mini, programs over the catalogue got 56 of 80 right, and over the tuned catalogue 49\./);
   assert.match(limits.points[0].text, /gpt-6-luna accuracy ties: the smallest p-value against the code surface is 0\.12\./);
-  assert.match(limits.points[1].text, /One mock estate of 194 resources, eight tasks, ten runs each\./);
-  assert.match(limits.points[2].text, /single narrow lookup .* about 0\.6\u00d7 the tokens/);
-  assert.match(limits.points[3].text, /not an invoice/);
+  assert.match(limits.points[1].text, /within 18% of the code surface on the unplanned tasks/);
+  assert.match(limits.points[2].text, /One mock estate of 194 resources, eight tasks, ten runs each\./);
+  assert.match(limits.points[3].text, /single narrow lookup .* about 0\.6\u00d7 the tokens/);
+  assert.match(limits.points[4].text, /not an invoice/);
 });
 
-test('results: every row is a bar for the cell it names, and one row on each panel is the cheapest', () => {
-  for (const b of RESULTS_BEATS) {
-    for (const p of buildResults(b.id).panels) {
-      assert.deepEqual(p.groups.map((g) => g.id), ['catalogue', 'tuned', 'code']);
-      const rows = p.groups.flatMap((g) => g.rows);
-      assert.deepEqual(rows.map((r) => r.id), SIX, 'the rows are the same in the same order on every model, so the bars can be compared across panels');
-      assert.equal(rows.filter((r) => r.cheapest).length, 1, `${p.model}: one cheapest`);
-      assert.equal(rows.find((r) => r.cheapest)!.id, CODE);
-      assert.equal(p.groups[2].rows.length, 1, 'the code surface is a group of its own');
-      for (const r of rows) {
-        const c = cellOf(p.model, r.id);
-        assert.equal(r.correct, c.correct);
-        assert.equal(r.fill, c.correct / c.runs);
-        assert.equal(r.usd, fmtUsd(perThousandRight(c)));
-        assert.equal(r.isCode, r.id === CODE);
-        assert.ok(r.label.length <= 22, `${r.label}: the label column is 186px`);
-        assert.match(r.aria, new RegExp(`${r.correct} of ${r.runs} right, ${r.usd.replace('$', '\\$')} per 1,000 right answers$`));
+test('results: every row is a bar for the cell it names, one row on each plane is the cheapest, and a method that did not run says so', () => {
+  for (const { model, set } of RESTS) {
+    const v = set === 'preset' ? buildResults(model) : buildResults('unplanned', model);
+    const t = v.table!;
+    assert.equal(t.model, model);
+    assert.equal(t.set, set);
+    assert.equal(t.deployment, modelOf(model).deployment);
+    assert.equal(t.price, priceLine(model));
+    assert.deepEqual(t.groups.map((g) => g.id), ['catalogue', 'tuned', 'code']);
+    const rows = t.groups.flatMap((g) => g.rows);
+    assert.deepEqual(rows.map((r) => r.id), EIGHT, 'the rows are the same in the same order on every model, so the bars can be compared');
+    assert.equal(rows.filter((r) => r.cheapest).length, 1, `${set} ${model}: one cheapest`);
+    assert.equal(rows.find((r) => r.cheapest)!.id, cheapestRun(set, model).id);
+    assert.equal(t.groups[2].rows.length, 1, 'the code surface is a group of its own');
+    for (const r of rows) {
+      const c = cellIn(set, model, r.id);
+      assert.equal(r.ran, Boolean(c), `${set} ${model} ${r.id}`);
+      assert.equal(r.isCode, r.id === CODE);
+      assert.ok(r.label.length <= 24, `${r.label}: the label column is narrow`);
+      if (!c) {
+        assert.equal(r.usd, '\u2013');
+        assert.equal(r.fill, 0);
+        assert.match(r.aria, /not run on gpt-5\.4-mini, which does not offer hosted programmatic calling$/);
+        continue;
+      }
+      assert.equal(r.correct, c.correct);
+      assert.equal(r.runs, 40);
+      assert.equal(r.fill, c.correct / c.runs);
+      assert.equal(r.usd, fmtUsd(perThousandRuns(c)));
+      assert.equal(r.usdValue, perThousandRuns(c));
+      assert.match(r.aria, new RegExp(`${c.correct} of 40 right, ${r.usd.replace('$', '\\$')} per 1,000 runs$`));
+    }
+  }
+  assert.deepEqual(buildResults('older').table!.groups.flatMap((g) => g.rows).filter((r) => !r.ran).map((r) => r.id), ['naive-ptc-native', 'tuned-ptc-native']);
+});
+
+test('plane: the scales are the benchmark\'s, every cell has a place inside the frame, and the interval is the Wilson interval', () => {
+  const [lo, hi] = wilson(40, 40);
+  assert.ok(Math.abs(lo - 0.9124) < 1e-4 && hi === 1, `40 of 40 is 91% to 100%, not a certainty: ${lo}`);
+  const [l2, h2] = wilson(21, 40);
+  assert.ok(Math.abs(l2 - 0.375) < 1e-3 && Math.abs(h2 - 0.6706) < 1e-3, `21 of 40: ${l2} to ${h2}`);
+  assert.deepEqual(wilson(0, 0), [0, 1], 'no runs, no knowledge');
+  assert.ok(wilson(30, 40)[0] < 0.75 && wilson(30, 40)[1] > 0.75, 'the point is inside its interval');
+  // The frame: a log axis of dollars per 1,000 runs and a linear one of the share right, fixed for every model and both sets.
+  assert.equal(xOf(X_LO), PLOT.x0);
+  assert.equal(xOf(X_HI), PLOT.x1);
+  assert.equal(yOf(Y_MIN), PLOT.y1);
+  assert.equal(yOf(Y_MAX), PLOT.y0);
+  assert.ok(Math.abs(xOf(2) - xOf(1) - (xOf(4) - xOf(2))) < 1e-9, 'a log axis: each doubling is the same distance');
+  assert.ok(X_TICKS.length >= 4 && X_TICKS.every((t) => t >= X_LO && t <= X_HI));
+  assert.ok(Y_TICKS.every((t) => t >= Y_MIN - 1e-9 && t <= 1 + 1e-9) && Y_TICKS[Y_TICKS.length - 1] === 1);
+  assert.equal(fmtTick(0.2), '$0.2');
+  assert.equal(fmtTick(10), '$10');
+  let cells = 0;
+  for (const set of SET_KEYS) {
+    for (const m of MODEL_KEYS) {
+      for (const a of ARMS) {
+        const p = poseOf(set, m, a.id);
+        assert.equal(p !== null, Boolean(cellIn(set, m, a.id)), `${set} ${m} ${a.id}`);
+        if (!p) continue;
+        cells += 1;
+        assert.ok(p.x >= PLOT.x0 && p.x <= PLOT.x1 && p.y >= PLOT.y0 && p.y <= PLOT.y1, `${set} ${m} ${a.id} is on the plane`);
+        assert.ok(p.top <= p.y && p.y <= p.bottom, `${set} ${m} ${a.id}: the interval brackets the point`);
       }
     }
   }
+  assert.equal(cells, 2 * (6 + 8 + 8), 'six methods on the older model, eight on each of the others, on both sets');
+  // The better the model, the further left the code surface sits: the price per token fell.
+  const codeXs = MODEL_KEYS.map((m) => poseOf('preset', m, CODE)!.x);
+  assert.ok(codeXs[0] > codeXs[1] && codeXs[1] > codeXs[2], 'older to newest, it moves left');
 });
 
-test('the tour is seven screens and the workshop ten, every screen either names is a page, and every page links only to pages', () => {
+test('plane: a marker glides between the places it was measured, a method that arrives later fades in, and the trail is where it has been', () => {
+  const near = (p: Marker, q: Marker | null, why: string) => {
+    assert.ok(q, why);
+    for (const k of ['x', 'y', 'top', 'bottom'] as const) assert.ok(Math.abs(p[k] - q![k]) < 1e-9, `${why}: ${k}`);
+  };
+  for (const a of ARMS) {
+    for (const [t, m] of MODEL_KEYS.entries()) {
+      for (const [s, set] of SET_KEYS.entries()) {
+        if (!cellIn('preset', m, a.id)) continue;
+        near(markerAt(a.id, t, s), poseOf(set, m, a.id), `${a.id} at rest on ${m}, ${set}`);
+      }
+    }
+  }
+  // Halfway between two models is halfway between their places, on a straight line, so any state glides to any other.
+  const a = poseOf('preset', 'older', CODE)!;
+  const b = poseOf('preset', 'newer', CODE)!;
+  const mid = markerAt(CODE, 0.5, 0);
+  assert.ok(Math.abs(mid.x - (a.x + b.x) / 2) < 1e-9 && Math.abs(mid.y - (a.y + b.y) / 2) < 1e-9);
+  near(mixMarker(a, b, 0), a, 'a mix of none is the first');
+  near(mixMarker(a, b, 1), b, 'a mix of all is the second');
+  // The hosted methods ran from the newer model on: before it they wait where they will arrive, invisible, and fade in on the way.
+  for (const id of ['naive-ptc-native', 'tuned-ptc-native'] as const) {
+    assert.equal(presence(id, 0), 0, `${id} is not there on the older model`);
+    assert.equal(presence(id, 0.5), 0.5);
+    assert.equal(presence(id, 1), 1);
+    assert.equal(presence(id, 2), 1);
+    near(markerAt(id, 0, 0), poseOf('preset', 'newer', id), `${id} waits where it will first appear`);
+  }
+  assert.equal(presence(CODE, 0), 1, 'the six that ran everywhere are always there');
+  // The trail: the places it has been, with no dot where it stands.
+  const standing = (p: { x: number; y: number }, q: { x: number; y: number }) => Math.hypot(p.x - q.x, p.y - q.y) < 0.5;
+  const t0 = trailOf(CODE, 0, 0);
+  assert.equal(t0.ghosts.length, 0, 'at the start it has been nowhere else');
+  assert.equal(t0.journey.length, 1);
+  const t2 = trailOf(CODE, 2, 0);
+  assert.equal(t2.journey.length, 3, 'one point for each model it has stood on');
+  assert.equal(t2.ghosts.length, 2, 'two of them are places it has left');
+  assert.ok(t2.ghosts.every((g) => !standing(g, markerAt(CODE, 2, 0))));
+  const across = trailOf(CODE, 2, 1);
+  assert.equal(across.across.length, 2);
+  assert.ok(standing(across.across[1], markerAt(CODE, 2, 1)), 'the way across ends at the head');
+  assert.ok(across.ghosts.every((g) => !standing(g, markerAt(CODE, 2, 1))));
+  const hosted = trailOf('naive-ptc-native', 1, 0);
+  assert.equal(hosted.journey.length, 1, 'a hosted method has been on one model so far');
+});
+
+test('plane: every resting place names the code surface and the cheapest, and no name runs into a marker, another name or the frame', () => {
+  assert.equal(RESTS.length, 6, 'three models, two sets');
+  for (const { model, set } of RESTS) {
+    const named = namedArms(set, model);
+    assert.equal(named[0].arm, CODE);
+    assert.equal(named.length, cheapestRun(set, model).id === CODE ? 1 : 2, `${set} ${model}: the cheapest is named when it is not the code surface`);
+    const labels = labelsFor(set, model);
+    assert.deepEqual(labels.map((l) => l.arm), named.map((n) => n.arm));
+    for (const l of labels) assert.equal(l.text.endsWith('cheapest'), l.kind === 'cheapest');
+    assert.equal(labelClashes(set, model), 0, `${set} ${model}: a name is in the clear`);
+  }
+  assert.ok(textWidth('Code surface') > 60 && textWidth('Code surface') < 120);
+});
+
+test('the tour is eight screens and the workshop eleven, every screen either names is a page, and every page links only to pages', () => {
   const routes = new URL('../src/routes/tour/', import.meta.url);
   const pages = readdirSync(routes, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(new URL(`${d.name}/+page.svelte`, routes))).map((d) => `/tour/${d.name}`);
   const steps = SCREENS.map((s) => s.href);
-  assert.deepEqual(steps, ['/tour/estate', '/tour/tools', '/tour/strains', '/tour/language', '/tour/object', '/tour/code', '/tour/results']);
+  assert.deepEqual(steps, ['/tour/estate', '/tour/tools', '/tour/strains', '/tour/language', '/tour/object', '/tour/code', '/tour/guard', '/tour/results']);
   const workshop = WORKSHOP_SCREENS.map((s) => s.href);
   assert.deepEqual([...pages].sort(), [...workshop].sort(), 'no page is missing from the workshop, and no workshop step is missing a page');
   for (const d of pages) {
@@ -2459,20 +3156,26 @@ test('the tour is seven screens and the workshop ten, every screen either names 
   }
   const results = readFileSync(new URL('../src/lib/tour/results.ts', import.meta.url), 'utf8');
   assert.ok(!/href: '\/tour\/(?!results)/.test(results), 'the results module does not link out');
+  const guard = readFileSync(new URL('../src/lib/tour/guard.ts', import.meta.url), 'utf8');
+  assert.ok(!/href: '\/tour\/(?!guard)/.test(guard), 'the guard module does not link out');
 });
 
 // ── presenter mode ───────────────────────────────────────────────────────────
 
 test('presenter: the screens are one list, and from any screen the one before and the one after are found', () => {
-  assert.deepEqual(SCREENS.map((s) => s.id), ['estate', 'tools', 'strains', 'language', 'object', 'code', 'results']);
+  assert.deepEqual(SCREENS.map((s) => s.id), ['estate', 'tools', 'strains', 'language', 'object', 'code', 'guard', 'results']);
   assert.equal(screenIndexOf('/tour/code'), 5);
   assert.equal(screenIndexOf('/tour/code/'), 5);
+  assert.equal(screenIndexOf('/tour/guard'), 6);
+  assert.equal(screenIndexOf('/tour/results'), 7);
   assert.equal(screenIndexOf('/tour'), -1);
   assert.equal(screenIndexOf('/tour/codex'), -1, 'a path that only starts like a screen is not that screen');
   assert.equal(screenIndexOf('/'), -1);
   // Going on arrives at the first beat of the next screen; going back arrives at the last beat of the one before.
   assert.deepEqual(crossTo('/tour/tools', 1), { screen: SCREENS[2], href: '/tour/strains' });
   assert.deepEqual(crossTo('/tour/strains', -1), { screen: SCREENS[1], href: SCREENS[1].end });
+  assert.deepEqual(crossTo('/tour/code', 1), { screen: SCREENS[6], href: '/tour/guard' });
+  assert.deepEqual(crossTo('/tour/results', -1), { screen: SCREENS[6], href: SCREENS[6].end }, 'back from the results is the last beat of the guard rails');
   assert.equal(crossTo('/tour/estate', -1), null, 'the talk has a first screen');
   assert.equal(crossTo('/tour/results', 1), null, 'and a last');
   assert.equal(crossTo('/tour', 1), null);
@@ -2496,12 +3199,14 @@ test('presenter: the address a screen is entered at from behind is that screen\u
   // The language: the last rung is the code.
   assert.equal(at(3).searchParams.get('rung'), 'code');
   assert.match(page('language'), /\[\.\.\.RUNG_IDS\.filter\(\(id\) => id !== 'code'\), 'grow', 'limits', 'code'\]/, 'the code rung comes last');
-  // The object, the code surface and the results: the last step, the last beat of the last example, the last beat.
+  // The object, the code surface, the guard rails and the results: the last step, the last beat of the last example, the last beat, the last beat.
   assert.equal(Number(at(4).searchParams.get('step')), LAST_STEP);
   const lastExample = exampleBeats().at(-1)!;
   assert.deepEqual(parseExampleState(at(5).searchParams), { id: lastExample.id, step: lastExample.step });
   assert.equal(Number(at(5).searchParams.get('step')), lastExample.step, 'spelled out, so the address is not odd to look at');
-  assert.equal(parseResultsBeat(at(6).searchParams), RESULTS_BEATS.at(-1)!.id);
+  assert.equal(Number(at(6).searchParams.get('at')), GUARD_BEATS.length - 1);
+  assert.equal(at(6).href, new URL(GUARD_PANELS.at(-1)!.href, 'http://tour.test').href, 'the guard rails end on their last panel');
+  assert.equal(parseResultsBeat(at(7).searchParams), RESULTS_BEATS.at(-1)!.id);
 });
 
 test('presenter keys: arrows, Page and Space step, Shift jumps a group, Home and End go to the ends', () => {
@@ -2639,9 +3344,9 @@ test('examples: each beat names its example as its group, so Shift and an arrow 
 const text = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const at = (href: string) => new URL(href, 'http://workshop.test');
 
-test('workshop: the seven keep their numbers and their order, three screens go around them, and the three take no number', () => {
-  assert.deepEqual(WORKSHOP_SCREENS.map((s) => s.id), ['welcome', 'estate', 'tools', 'strains', 'language', 'object', 'code', 'turn', 'results', 'wrap']);
-  assert.deepEqual(WORKSHOP_SCREENS.filter((s) => s.n !== undefined).map((s) => s.n), [1, 2, 3, 4, 5, 6, 7]);
+test('workshop: the eight keep their numbers and their order, three screens go around them, and the three take no number', () => {
+  assert.deepEqual(WORKSHOP_SCREENS.map((s) => s.id), ['welcome', 'estate', 'tools', 'strains', 'language', 'object', 'code', 'guard', 'turn', 'results', 'wrap']);
+  assert.deepEqual(WORKSHOP_SCREENS.filter((s) => s.n !== undefined).map((s) => s.n), [1, 2, 3, 4, 5, 6, 7, 8]);
   assert.deepEqual(WORKSHOP_SCREENS.filter((s) => s.n === undefined).map((s) => s.id), [...WORKSHOP_ONLY]);
   assert.ok(WORKSHOP_SCREENS.every((s) => (s.n === undefined) === (s.mark !== undefined)), 'a screen without a number has a mark to draw in its place');
   assert.equal(screensOf('tour'), SCREENS);
@@ -2662,8 +3367,11 @@ test('workshop: only the three screens the tour does not have put a visitor in t
 
 test('workshop: the screen before and the one after come from the list the visitor walks', () => {
   const turn = WORKSHOP_SCREENS.find((s) => s.id === 'turn')!;
-  assert.deepEqual(crossTo('/tour/code', 1, WORKSHOP_SCREENS), { screen: turn, href: '/tour/turn' });
-  assert.equal(crossTo('/tour/code', 1)?.screen.id, 'results', 'the tour goes from the code surface straight to the results');
+  const guard = WORKSHOP_SCREENS.find((s) => s.id === 'guard')!;
+  assert.deepEqual(crossTo('/tour/code', 1, WORKSHOP_SCREENS), { screen: guard, href: '/tour/guard' }, 'the room has seen the programs before it sees the gates');
+  assert.deepEqual(crossTo('/tour/guard', 1, WORKSHOP_SCREENS), { screen: turn, href: '/tour/turn' }, 'and has the keyboard once it has seen the gates');
+  assert.deepEqual(crossTo('/tour/turn', -1, WORKSHOP_SCREENS), { screen: guard, href: guard.end });
+  assert.equal(crossTo('/tour/guard', 1)?.screen.id, 'results', 'the tour goes from the guard rails straight to the results');
   assert.deepEqual(crossTo('/tour/results', -1, WORKSHOP_SCREENS), { screen: turn, href: turn.end }, 'back from the results is the last of the exercises');
   assert.equal(crossTo('/tour/estate', -1, WORKSHOP_SCREENS)?.screen.id, 'welcome');
   assert.equal(crossTo('/tour/welcome', -1, WORKSHOP_SCREENS), null, 'the workshop starts at the welcome');
@@ -2671,6 +3379,8 @@ test('workshop: the screen before and the one after come from the list the visit
   assert.equal(screenIndexOf('/tour/welcome'), -1, 'the tour has no welcome');
   assert.equal(screenIndexOf('/tour/welcome', WORKSHOP_SCREENS), 0);
   assert.equal(screenIndexOf('/tour/code', WORKSHOP_SCREENS), 6);
+  assert.equal(screenIndexOf('/tour/guard', WORKSHOP_SCREENS), 7);
+  assert.equal(screenIndexOf('/tour/results', WORKSHOP_SCREENS), 9);
 });
 
 test('workshop: the address each new screen is entered at from behind is its real last beat', () => {
@@ -2725,7 +3435,8 @@ test('the plan: ninety minutes from the first screen to the last, the last twent
   assert.equal(QUESTIONS_FROM, 70);
   assert.deepEqual(BLOCKS.filter((b) => b.to > QUESTIONS_FROM).map((b) => b.screen), ['wrap'], 'the questions are on the last screen alone');
   assert.equal(BLOCKS.at(-1)!.to - QUESTIONS_FROM, QUESTION_MINUTES);
-  assert.equal(rangeOf(blockOf('tools')!), '9\u201321 min');
+  assert.equal(rangeOf(blockOf('tools')!), '8\u201319 min');
+  assert.deepEqual(BLOCKS.map((b) => minutesOf(b)), [3, 5, 11, 7, 7, 7, 8, 8, 6, 6, 22], 'the minutes of each block, the last one with the questions in it');
   assert.equal(blockOf('nowhere'), null);
   assert.ok(BLOCKS.every((b) => b.gist.length > 0 && b.title.length > 0));
 });
@@ -2744,12 +3455,17 @@ test('the plan: what the room is asked, and the numbers the agenda quotes, are t
   assert.equal(run(programs['filter-aggregate'].code).totals.resourcesScanned, n, 'the program does read every record');
   assert.equal(EXAMPLES.filter((e) => e.kind === 'fresh').length, 2, 'two questions nobody planned for on the code screen');
   assert.match(blockOf('code')!.gist, /two questions nobody planned for/);
-  assert.match(blockOf('results')!.gist, /^Three models, six methods, 80 runs each/);
+  assert.match(blockOf('results')!.gist, /^Three models, eight tasks: what holds as the model gets weaker/);
   assert.equal(MODELS.length, 3);
   assert.equal(METHODS.length, 6);
   assert.ok(MODELS.every((m) => METHODS.every((x) => cellOf(m.key, x.id).runs === 80)));
-  assert.match(blockOf('results')!.ask!, /On the older model, how many of 80/);
-  assert.equal(PLAN_SCREENS.filter((id) => blockOf(id)!.ask).length, 9, 'nine blocks ask the room something, and the last one is the questions');
+  const older = [setCell('preset', 'older', CODE), othersOn('preset', 'older').correct.max] as const;
+  assert.match(blockOf('results')!.ask!, new RegExp(`On the older model the code surface gets ${older[0].correct} of ${older[0].runs}\\. Of the other five methods, how many of ${older[0].runs} does the best one get\\?`));
+  assert.equal(older[1], 30, 'the answer the room is asked for');
+  assert.match(blockOf('guard')!.gist, new RegExp(`^${['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six'][GATES.length]} gates`), 'the plan says as many gates as the screen has');
+  assert.match(blockOf('guard')!.ask!, /stop the three most expensive running VMs/);
+  assert.ok(blockOf('guard')!.ask!.includes(`"${PRODUCTION_RULE.text}"`), 'the room is asked about the rule the screen shows, in its words');
+  assert.equal(PLAN_SCREENS.filter((id) => blockOf(id)!.ask).length, 10, 'ten blocks ask the room something, and the last one is the questions');
 });
 
 test('the welcome: three beats, three outcomes in the three ways a talk can leave someone better off, and how the room is asked to work', () => {
@@ -2913,14 +3629,19 @@ test('your turn: six beats, two to an exercise, each a URL the screen reads back
 test('the wrap: each line of the recap is read off the run it summarises, and says no more than the screens showed', () => {
   const inv = buildInventory();
   const lines = recapOf({ inv, projection: buildProjection(inv), programs });
-  assert.equal(lines.length, 5);
-  assert.deepEqual(lines.map((l) => l.screens), [[2], [3], [4], [5, 6], [7]]);
+  assert.equal(lines.length, 6);
+  assert.deepEqual(lines.map((l) => l.screens), [[2], [3], [4], [5, 6], [7], [8]]);
   const billed = costFacts(replayCatalog({ task: 'granular-read' })).billed;
   assert.equal(billed, 5894);
   assert.match(lines[0].text, new RegExp(`^One question took 3 narrow calls\\. The run was billed \u2248 5,894 tokens for a 14-token answer`));
   assert.match(lines[2].text, /refused 4 of the 4 questions nobody had planned for\.$/);
   assert.match(lines[3].text, /The cost question scans 194 records and sends back \u2248 63 tokens\. The tagging rule is 70 field changes on 37 resources, held for a person to approve\.$/);
-  assert.match(lines[4].text, /^80 of 80 on all three models\. On the older one the other methods got 39 to 56\. A narrow lookup is the exception: a direct call costs 0\.6\u00d7 the tokens\.$/);
+  assert.equal(
+    lines[4].text,
+    'A program reads only the projection, with 2 internal fields left out. A write is a change set the runtime derives, so a rule of yours can read it. The one we showed refused 3 of 3 power changes in Production. What passes goes to a person as a diff, and is checked again as it lands.'
+  );
+  assert.equal(DROPPED_FIELDS.length, 2);
+  assert.match(lines[5].text, /^80 of 80 on all three models\. On the older one the other methods got 39 to 56\. A narrow lookup is the exception: a direct call costs 0\.6\u00d7 the tokens\.$/);
   assert.equal(REPORTED.lookupDirectCallTokens, '0.6\u00d7');
   assert.deepEqual([codeSpan(['newest', 'newer', 'older']).min, othersSpan(['older']).min, othersSpan(['older']).max], [80, 39, 56]);
   assert.ok(lines.every((l) => !/secure|safe|guarantee/i.test(l.text)));
@@ -2928,6 +3649,7 @@ test('the wrap: each line of the recap is read off the run it summarises, and sa
 
 test('the wrap: six questions about an estate that is not this one, the claims about running code are the README\u2019s, and the files named are in the repository', () => {
   assert.equal(ASKS.length, 6);
+  assert.deepEqual(ASKS.map((a) => a.screens), [[3, 6], [2, 3], [5, 7], [6, 7], [7], [8]], 'each question points at the screens that answered it: the projection at the object and at the first gate, the writes at the code surface and the last gates');
   for (const a of ASKS) {
     assert.ok(a.title.endsWith('?'), a.title);
     assert.ok(a.screens.length > 0 && a.screens.every((s) => SCREENS.some((x) => x.n === s)), `${a.title} points at screens that exist`);
@@ -3031,6 +3753,7 @@ function beatCounts(): Record<string, number> {
     language: buildLadder(inv, cmp.code).length - 1 + 3,
     object: STEP_IDS.length,
     code: exampleBeats().length,
+    guard: GUARD_BEATS.length,
     turn: turnBeats({ filter: 'a', field: 'b', rule: 'c' }).length,
     results: RESULTS_BEATS.length,
     wrap: WRAP_BEATS.length
@@ -3061,13 +3784,14 @@ test('the script: the run of show is the plan row for row, and the totals it quo
     assert.equal(Number(rows[i][3]), counts[b.screen], `${b.screen}: its beats`);
   });
   const beats = sum(Object.values(counts));
-  assert.equal(beats, 78);
-  assert.equal(WORKSHOP_SCREENS.length, 10);
-  assert.equal(SCREENS.length, 7);
-  assert.equal(beats - counts.welcome - counts.turn - counts.wrap, 66, 'the 20-minute talk is the seven screens, and the tour script says 66 beats');
-  assert.match(text('docs/tour-script.md'), /Seven screens, 66 beats\./);
+  assert.equal(beats, 84);
+  assert.equal(WORKSHOP_SCREENS.length, 11);
+  assert.equal(SCREENS.length, 8);
+  assert.equal(beats - counts.welcome - counts.turn - counts.wrap, 72, 'the 22-minute talk is the eight screens, and the tour script says 72 beats');
+  assert.match(text('docs/tour-script.md'), /Eight screens, 72 beats\./);
+  assert.match(text('docs/tour-script.md'), /about 22 minutes/);
   for (const said of [
-    `Ten screens, ${beats} beats`,
+    `Eleven screens, ${beats} beats`,
     `is ${beats - 1} presses`,
     `${TOTAL_MINUTES} minutes online: ${QUESTIONS_FROM} of talk, ${QUESTION_MINUTES} for questions`,
     `Talk ends at minute ${QUESTIONS_FROM}`,
@@ -3077,8 +3801,8 @@ test('the script: the run of show is the plan row for row, and the totals it quo
   ]) {
     assert.ok(script.includes(said), `the script says "${said}"`);
   }
-  assert.equal(BLOCKS.filter((b) => b.ask).length, 9);
-  for (const said of ['at nine marked moments', 'Nine times I will stop', 'Nine predictions in the chat']) assert.ok(script.includes(said), said);
+  assert.equal(BLOCKS.filter((b) => b.ask).length, 10);
+  for (const said of ['at ten marked moments', 'Ten times I will stop', 'Ten predictions in the chat']) assert.ok(script.includes(said), said);
 });
 
 test('the script: the time checks fall where the blocks end, and the cuts add up to what each block says it saves', () => {
@@ -3142,9 +3866,30 @@ test('the script: the figures it quotes on the tools screen, the code screen, Yo
   has(six, `${c(lookup).used} of ${c(lookup).scanned}`);
   for (const e of [cost, tag, disks, ratio, lookup]) has(six, `\u2248 ${c(e).tokens} tokens`);
   has(six, reviewCard(tag.outcome)!.summary.replace(/\s+/g, ' '));
-  const refusal = CONTRACT_PROBES.find((p) => p.id === 'cost')!;
-  const refused = buildExample({ def: defOf('break'), program: { code: refusal.code }, outcome: runTracked({ code: refusal.code, projection: exProj }), inv: exInv });
-  has(six, `\u2248 ${refused.answer.tokens} tokens`);
+
+  // ⑦ the gates: what each program is told, the line the screen flags, and what is said of the rule, the person and the apply.
+  const gates = sectionOf('guard');
+  const flagged = (v: ReturnType<typeof guardOf>, i = 0): string => `Line ${v.flags[i].line + 1} is flagged "${v.flags[i].text}"`;
+  const gRead = guardOf('read', 'read');
+  const gNet = guardOf('run', 'network');
+  const gChange = guardOf('change', 'change');
+  const gReach = guardOf('rule', 'reach');
+  const gNarrow = guardOf('review', 'narrow');
+  for (const v of [gRead, gNet, gChange, gReach]) has(gates, `(\u2248 ${v.example.answer.tokens} tokens)`);
+  for (const v of [gRead, gNet, gReach, gNarrow]) has(gates, flagged(v));
+  const [badEdit, goodEdit] = gChange.flags;
+  has(gates, `Line ${goodEdit.line + 1} green ("${goodEdit.text}"), line ${badEdit.line + 1} red ("${badEdit.text}")`);
+  has(gates, `\`error: ${gNet.raw.error}\``);
+  has(gates, `\`error: ${gChange.raw.error}\``);
+  has(gates, `error: ${gReach.hit!.message}`);
+  has(gates, `The answer is ${gReach.hit!.offenders.length} of ${gReach.hit!.total}:`);
+  has(gates, 'Stopped after 1500 ms.');
+  has(gates, gNarrow.example.review!.rows.map((r) => r.name).join(', '));
+  has(gates, `"${gNarrow.example.review!.resources} resources, ${gNarrow.example.review!.fields} fields"`);
+  const gStale = guardOf('apply', 'narrow', { decision: 'approved' });
+  has(gates, gStale.told!.lines[0]);
+  has(gates, `"${gStale.example.review!.rows.find((r) => r.note)!.note}"`);
+  has(gates, movedOn(gInv, gStale.raw.diff).resource);
 
   // Your turn: the tiles before and after each change.
   const turn = sectionOf('turn');
@@ -3165,19 +3910,67 @@ test('the script: the figures it quotes on the tools screen, the code screen, Yo
   has(turn, `${idle.diff.length} fields on ${idle.resourcesAffected} resources`);
   has(turn, `${env.diff.length} fields on the same ${env.resourcesAffected} resources`);
 
-  // ⑦ the measured results.
-  const seven = sectionOf('results');
-  const older = othersSpan(['older']);
-  const newer = othersSpan(['newer', 'newest']);
-  has(seven, `${older.min} to ${older.max} of 80`);
-  has(seven, `Between ${older.min} and ${older.max}.`);
-  has(seven, `the other five get ${newer.min} to ${newer.max} of 80`);
-  const cents = (usd: number): number => Math.round(usd * 100);
-  has(seven, `${cents(perThousandRight(cellOf('newest', CODE)))} cents per thousand right answers for the code surface on the newest model, against ${cents(nextCheapest('newest').usd)} for the next cheapest`);
+  // ⑧ the measured results, model by model.
+  const eight = sectionOf('results');
+  const NUM = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+  const pre = (m: ModelKey, a: ArmId): Cell => setCell('preset', m, a);
+  const usd = (set: TaskSet, m: ModelKey, a: ArmId): string => fmtUsd(perThousandRuns(setCell(set, m, a)));
+  const FIVE: ArmId[] = ['naive-direct', 'calc-direct', 'naive-ptc', 'tuned-direct', 'tuned-ptc'];
+  const rest = othersOn('preset', 'older');
+  assert.equal(pre('older', CODE).correct, pre('older', CODE).runs);
+  const tied = FIVE.filter((a) => pre('older', a).correct === rest.correct.max).length;
+  has(eight, `The best of the other five gets ${rest.correct.max} of ${pre('older', CODE).runs}, and ${NUM[tied]} of them do.`);
+  has(eight, `Catalogue ${pre('older', 'naive-direct').correct}, ${pre('older', 'calc-direct').correct} and ${pre('older', 'naive-ptc').correct}; Tuned ${pre('older', 'tuned-direct').correct} and ${pre('older', 'tuned-ptc').correct}`);
+  has(eight, `The other five get between ${rest.correct.min} and ${rest.correct.max}`);
+  has(eight, `${pre('older', 'naive-ptc').correct} and ${pre('older', 'tuned-ptc').correct}. And the code surface`);
+  const slow = cheapestRun('preset', 'older');
+  has(eight, `${usd('preset', 'older', CODE)} per thousand runs, against ${fmtUsd(slow.usd)} for the cheapest method, which gets ${slow.correct}`);
+  has(eight, `Code surface ${pre('older', CODE).correct} of ${pre('older', CODE).runs}, ${usd('preset', 'older', CODE)}`);
+  // The middle model: everything cheaper and better, and the code surface no longer the cheapest.
+  const mid = cheapestRun('preset', 'newer');
+  assert.equal(mid.id, 'tuned-direct');
+  const under = Math.round((1 - mid.usd / perThousandRuns(pre('newer', CODE))) * 100);
+  has(eight, `${+priceDrop('newer').min.toFixed(2)} times less per token`);
+  has(eight, `${usd('preset', 'newer', 'tuned-direct')} against ${usd('preset', 'newer', CODE)}) at ${pre('newer', 'tuned-direct').correct} of ${pre('newer', 'tuned-direct').runs}`);
+  has(eight, `is ${NUM[under]} percent under it and gets ${mid.correct}`);
+  // The newest: five methods at the top, and the code surface the cheapest.
+  const next = cheapestRun('preset', 'newest', ARMS.filter((a) => a.id !== CODE).map((a) => a.id));
+  assert.deepEqual(priceDrop('newest'), { min: 7.5, max: 9 });
+  has(eight, 'seven and a half to nine times less per token');
+  assert.equal(perfectOn('preset', 'newest').length, 5);
+  has(eight, 'Five methods now get forty of forty');
+  has(eight, `the code surface furthest left, ${usd('preset', 'newest', CODE)}`);
+  const cents = (u: number): number => Math.round(u * 100);
+  has(eight, `${cents(perThousandRuns(pre('newest', CODE)))} cents per thousand runs against ${cents(next.usd)} for the next, which is ${Math.round((next.usd / perThousandRuns(pre('newest', CODE)) - 1) * 100)} percent more`);
+  // Four questions nobody planned for.
+  const wide = perThousandRuns(setCell('unplanned', 'newest', 'tuned-direct')) / perThousandRuns(pre('newest', 'tuned-direct'));
+  has(eight, `${usd('preset', 'newest', 'tuned-direct')} \u2192 ${usd('unplanned', 'newest', 'tuned-direct')} (${fmtTimes(wide)})`);
+  has(eight, `${usd('preset', 'newest', CODE)} \u2192 ${usd('unplanned', 'newest', CODE)}`);
+  assert.equal(Math.round(wide), 4);
+  has(eight, 'four times');
+  // What a right answer costs, and the two effects that multiply.
   const x = multiples();
-  for (const q of [fmtTimes(x.model), fmtTimes(x.method), fmtTimes(x.both)]) has(seven, q);
-  has(seven, `programs over the catalogue got ${cellOf('older', 'naive-ptc').correct} of 80, and over the tuned catalogue ${cellOf('older', 'tuned-ptc').correct}`);
-  has(seven, `${REPORTED.lookupDirectCallTokens.replace('\u00d7', '')} times the tokens`);
+  const right = (m: ModelKey, a: ArmId): string => fmtUsd(perThousandRight(cellOf(m, a)));
+  has(eight, `${right('older', 'naive-direct')}, ${right('newest', 'naive-direct')} and ${right('newest', CODE)} per 1,000 right answers`);
+  for (const q of [fmtTimes(x.model), fmtTimes(x.method), fmtTimes(x.both)]) has(eight, q);
+  assert.equal(Math.round(x.model), 13);
+  assert.ok(x.method > 4.5 && x.method < 5);
+  assert.equal(Math.round(x.both), 65);
+  has(eight, 'thirteen times cheaper');
+  has(eight, 'nearly five times cheaper');
+  has(eight, 'sixty-five times');
+  assert.equal(right('older', 'naive-direct'), '$18.7');
+  assert.equal(cents(perThousandRight(cellOf('newest', CODE))), 29);
+  has(eight, 'eighteen dollars seventy against twenty-nine cents per thousand right answers');
+  // Why: the one measured thing, and what the screen says it does not show.
+  has(eight, `programs over the catalogue got ${cellOf('older', 'naive-ptc').correct} of 80, and over the tuned catalogue ${cellOf('older', 'tuned-ptc').correct}`);
+  const whyText = (buildResults('why').columns ?? []).flatMap((c) => c.points.map((p) => p.text)).join(' ');
+  has(eight, `within ${whyText.match(/within (\d+)%/)![1]} percent of the code surface on the unplanned tasks`);
+  has(eight, `one mock estate of ${REPORTED.estateResources} resources`);
+  has(eight, `${REPORTED.lookupDirectCallTokens.replace('\u00d7', '')} times the tokens`);
+  // The recap's last line is the same snapshot, over all eight tasks.
+  const older = othersSpan(['older']);
+  has(sectionOf('wrap'), `the others got ${older.min} to ${older.max}`);
   // What the questions section says of programs over the catalogue: on the newer models they cost between a quarter and a half of one-by-one calls.
   const share = (['newest', 'newer'] as ModelKey[]).flatMap((m) =>
     (['naive', 'tuned'] as const).map((k) => cellOf(m, `${k}-ptc` as ArmId).totalUsd / cellOf(m, `${k}-direct` as ArmId).totalUsd)
@@ -3213,6 +4006,7 @@ test('the script: its pictures, its links to other documents and the addresses i
     switch (u.pathname) {
       case '/tour/welcome': return !q.has('at') || parseAt(q, WELCOME_BEATS.length) === Number(q.get('at'));
       case '/tour/wrap': return !q.has('at') || parseAt(q, WRAP_BEATS.length) === Number(q.get('at'));
+      case '/tour/guard': return !q.has('at') || parseAt(q, GUARD_BEATS.length) === Number(q.get('at'));
       case '/tour/turn': { const t = parseTurn(q); return turnHref(t.id, t.step) === whole; }
       case '/tour/code': { const s = parseExampleState(q); return exampleHref(s.id, s.step) === whole; }
       case '/tour/results': return resultsHref(parseResultsBeat(q)) === whole;
@@ -3226,5 +4020,19 @@ test('the script: its pictures, its links to other documents and the addresses i
     const url = at(u);
     assert.ok(pages.has(url.pathname), `${u} is a screen`);
     assert.ok(isBeat(url), `${u} is a beat the screen reads back`);
+  }
+});
+
+test('the scripts: every picture they show exists, and none is left over from a screen that is gone', () => {
+  const docs = (p: string) => new URL(`../docs/${p}`, import.meta.url);
+  const shown = new Set<string>();
+  for (const file of ['tour-script.md', 'workshop-script.md']) {
+    for (const m of readFileSync(docs(file), 'utf8').matchAll(/\]\(((?:tour-script|workshop-script)\/[^)\s]+\.jpg)\)/g)) {
+      assert.ok(existsSync(docs(m[1])), `${file}: ${m[1]} is a picture under docs/`);
+      shown.add(m[1]);
+    }
+  }
+  for (const dir of ['tour-script', 'workshop-script']) {
+    for (const f of readdirSync(docs(`${dir}/`))) assert.ok(shown.has(`${dir}/${f}`), `${dir}/${f} is shown by a script`);
   }
 });

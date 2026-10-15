@@ -252,9 +252,9 @@
     color: var(--color-text-muted);
   }
 
-  /* Seven titles in a row need about 1000px of viewport, ten about 1600 (the card is 1569px wide with them, and keeps 16px to each edge);
-     narrower than that, only the screen the talk is on keeps its title. Each breakpoint keeps about 40px to spare for other fonts. */
-  @media (max-width: 1100px) {
+  /* Eight titles in a row need a card 1347px wide, so about 1410px of viewport (the card keeps 16px to each edge, and about 30px to spare for other fonts);
+     the workshop's eleven need a card 1788px wide, so about 1860px. Narrower than that, only the screen the talk is on keeps its title. */
+  @media (max-width: 1410px) {
     .steps li:not(.now) .title {
       display: none;
     }
@@ -265,7 +265,7 @@
       padding-right: 14px;
     }
   }
-  @media (max-width: 1640px) {
+  @media (max-width: 1860px) {
     .steps.many li:not(.now) .title {
       display: none;
     }

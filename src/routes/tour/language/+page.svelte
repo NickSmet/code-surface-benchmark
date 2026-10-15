@@ -714,6 +714,10 @@
     flex-direction: column;
     gap: 8px;
   }
+  /* Presented in a short window, the calculator rung is the tallest beat of this screen; less air between its parts keeps it on the page. */
+  :global(.tour.present) .ladder-panel {
+    gap: 6px;
+  }
   .cols,
   .rung {
     display: grid;

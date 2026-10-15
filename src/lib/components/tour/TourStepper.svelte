@@ -7,9 +7,9 @@
 
   // `hint` is the tooltip: the bar stays one line tall so the screens below it can fit a laptop.
   const presenter = usePresenter();
-  /** The seven of the tour, or the ten of the workshop. */
+  /** The eight of the tour, or the eleven of the workshop. */
   const steps = $derived(presenter.screens);
-  /** Ten titles do not fit a bar: past eight steps only the screen the talk is on keeps its title. */
+  /** Eleven titles do not fit a bar: past eight steps only the screen the talk is on keeps its title. */
   const many = $derived(steps.length > 8);
 
   const currentIndex = $derived(screenIndexOf(page.url.pathname, steps));
@@ -175,7 +175,7 @@
     background: var(--color-brand-bg);
   }
 
-  /* The workshop's ten steps would need about 1900px with every title, so the ones the talk is not on are their number or picture and a tooltip. */
+  /* The workshop's eleven steps would need about 1900px with every title, so the ones the talk is not on are their number or picture and a tooltip. */
   .many .step:not(.current) .title {
     display: none;
   }
@@ -186,28 +186,12 @@
     padding-right: 12px;
   }
 
-  /* Seven steps, the tagline and the Present icon need about 1630px. Without the tagline they need about 1470px; with "Live" for "Live benchmark" about 1385px;
-     tighter pills and joints carry them down to about 1310px. Each breakpoint keeps about 30px to spare for other fonts.
-     Below 1340px the steps get a row of their own. The Present button shows its label from 1740px up (about 90px against the icon's 30). */
-  @media (max-width: 1740px) {
-    .present-label {
-      display: none;
-    }
-    .present {
-      padding: 5px 7px;
-    }
-  }
-  @media (max-width: 1660px) {
-    .brand-sub {
-      display: none;
-    }
-  }
-  @media (max-width: 1540px) {
-    .live-more {
-      display: none;
-    }
-  }
-  @media (max-width: 1450px) {
+  /* Eight steps with every title need about 1220px of bar with roomy pills, and about 1085px with tight ones. Beside the brand, the Present button and
+     the Live link, tight pills with the tagline, "Live benchmark" and the Present label all showing need about 1940px of window; each of the three
+     gives way in turn (1800px, 1780px, 1580px), and below 1495px only the screen the talk is on keeps its title. Each breakpoint keeps about 30px
+     to spare for other fonts.
+     Below 1340px the steps get a row of their own. */
+  @media (max-width: 1939px) {
     .steps {
       gap: 2px;
     }
@@ -218,6 +202,32 @@
     .step a {
       gap: 6px;
       padding-right: 8px;
+    }
+  }
+  @media (max-width: 1800px) {
+    .present-label {
+      display: none;
+    }
+    .present {
+      padding: 5px 7px;
+    }
+  }
+  @media (max-width: 1780px) {
+    .brand-sub {
+      display: none;
+    }
+  }
+  @media (max-width: 1580px) {
+    .live-more {
+      display: none;
+    }
+  }
+  @media (max-width: 1495px) {
+    .step:not(.current) .title {
+      display: none;
+    }
+    .step:not(.current) a {
+      padding-right: 4px;
     }
   }
   @media (max-width: 1340px) {

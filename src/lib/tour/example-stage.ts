@@ -39,17 +39,23 @@ export interface ExampleDef {
 
 const LIFE = ['write', 'run', 'answer'] as const;
 
+/** The examples the code screen walks: five programs that each run on their own. */
 export const EXAMPLES: readonly ExampleDef[] = [
   { id: 'cost', label: 'Cost by group', kind: 'task', task: 'filter-aggregate', phases: LIFE },
   { id: 'tag', label: 'Tag and deallocate', kind: 'task', task: 'bulk-write', phases: [...LIFE, 'review'] },
   { id: 'disks', label: 'Disks of stopped VMs', kind: 'fresh', fresh: 'disks', phases: LIFE },
   { id: 'ratio', label: 'Cost per vCPU', kind: 'fresh', fresh: 'ratio', phases: LIFE },
-  { id: 'lookup', label: 'A narrow lookup', kind: 'task', task: 'single-lookup', phases: LIFE },
-  { id: 'break', label: 'Try to break it', kind: 'break', phases: ['see', 'change', 'do'] }
+  { id: 'lookup', label: 'A narrow lookup', kind: 'task', task: 'single-lookup', phases: LIFE }
 ];
 
+/**
+ * A program that is the room's to change. It is not one of the screen's examples: the screens that let a program be edited
+ * (the guard rails, and the workshop's turn at the keyboard) draw the same stage with this definition.
+ */
+export const EDITABLE: ExampleDef = { id: 'break', label: 'A program of your own', kind: 'break', phases: ['see', 'change', 'do'] };
+
 export const EXAMPLE_IDS: readonly ExampleId[] = EXAMPLES.map((e) => e.id);
-export const defOf = (id: ExampleId): ExampleDef => EXAMPLES.find((e) => e.id === id) ?? EXAMPLES[0];
+export const defOf = (id: ExampleId): ExampleDef => (id === EDITABLE.id ? EDITABLE : (EXAMPLES.find((e) => e.id === id) ?? EXAMPLES[0]));
 
 export const PHASE_WORD: Record<Phase, string> = {
   write: 'Write',
@@ -60,20 +66,6 @@ export const PHASE_WORD: Record<Phase, string> = {
   change: 'Change',
   do: 'Do'
 };
-
-export type Layer = 'see' | 'change' | 'do';
-
-/** What the contract guards in each of the three "try to break it" beats. */
-export const LAYER_LINE: Record<Layer, string> = {
-  see: 'The projection decides what exists.',
-  change: 'The runtime derives the change set.',
-  do: 'The sandbox decides what code may run.'
-};
-
-/** The probe each "try to break it" beat opens with. The others in the same layer are one click away. */
-export const BREAK_START: Record<Layer, string> = { see: 'internal', change: 'cost', do: 'loop' };
-
-export const probesOf = (layer: Layer): ContractProbe[] => CONTRACT_PROBES.filter((p) => p.layer === layer);
 
 // ── where the screen is, in the URL ────────────────────────────────────────
 
@@ -220,14 +212,19 @@ export const MAX_ANSWER_LINES = 7;
 /** Characters of 12.5px monospace that fit across the answer card. */
 export const ANSWER_WIDTH = 74;
 
+/** How an answer reads: it came back, it was refused, it came back with something left out, or it is a note the model should not act on. */
+export type Tone = 'ok' | 'bad' | 'note' | 'quiet';
+
 export interface AnswerCard {
-  tone: 'ok' | 'bad';
+  tone: Tone;
   label: string;
   /** Already clipped to the card. */
   lines: string[];
   /** Entries that did not fit, when the answer is a list longer than the card. */
   more: number;
   tokens: number;
+  /** Lines under the answer, in the card's own colour: what the answer leaves out. A new line starts a new line. */
+  foot?: string;
 }
 
 const clip = (s: string, n: number = ANSWER_WIDTH): string => (s.length > n ? s.slice(0, n - 1) + '\u2026' : s);
@@ -300,6 +297,87 @@ export function answerItems(o: RunOutcome): number | null {
   return Array.isArray(r) ? r.length : null;
 }
 
+// ── what the model is told once a person has decided ───────────────────────
+
+export interface Told {
+  tone: Tone;
+  label: string;
+  /** Already wrapped to the card. */
+  lines: string[];
+}
+
+export const TOLD_LINES = 4;
+
+/** A tool result's keys on as few lines as they fit, a long value wrapped on a line of its own: the text the model reads. An empty `logs` says nothing, so it is left off. */
+export function toldLines(content: string, width: number = ANSWER_WIDTH, max: number = TOLD_LINES): string[] {
+  const parsed = parseContent(content);
+  if (!parsed) return wrapWords(content, width).slice(0, max);
+  const entries = Object.entries(parsed)
+    .filter(([k, v]) => !(k === 'logs' && Array.isArray(v) && v.length === 0))
+    .map(([k, v]) => `${k}: ${oneLine(v)}`);
+  const out: string[] = [];
+  let row = '';
+  for (const e of entries) {
+    if (e.length > width) {
+      if (row) out.push(row);
+      row = '';
+      out.push(...wrapWords(e, width));
+    } else if (row && row.length + 2 + e.length > width) {
+      out.push(row);
+      row = e;
+    } else row = row ? `${row}  ${e}` : e;
+  }
+  if (row) out.push(row);
+  return out.length > max ? [...out.slice(0, max - 1), clip(`${out[max - 1]} \u2026`)] : out;
+}
+
+export const toldCard = (content: string, tone: Tone, label: string): Told => ({ tone, label, lines: toldLines(content) });
+
+// ── lines the run flagged ──────────────────────────────────────────────────
+
+export interface LineFlag {
+  /** Zero-based, into the program's lines. */
+  line: number;
+  /** `bad` the runtime refused it, `ok` it was fine (or goes on to a person), `note` it was not refused and was not there either. */
+  tone: 'bad' | 'ok' | 'note';
+  text: string;
+  /** When the run gets there. `cursor`: as the run reaches the line. `diff`: once the program has returned and the runtime compares before and after. */
+  at: 'cursor' | 'diff';
+  /** The characters of the line to underline, from and up to (not including). Absent: the whole line is marked and nothing is underlined. */
+  col?: readonly [number, number];
+}
+
+/** The lines a run steps through, in order: the statements of the function body, not its closing braces or the rest of a chain. */
+export function execLinesOf(lines: readonly string[], body: Block): number[] {
+  const out: number[] = [];
+  for (let i = body[0]; i <= body[1] && i < lines.length; i += 1) {
+    const t = lines[i].trim();
+    if (t === '' || t.startsWith('.') || /^[}\])]+[;,]?$/.test(t) || t === '{') continue;
+    out.push(i);
+  }
+  return out;
+}
+
+/** Where the cursor goes: every statement, and a run that stopped ends on the line it stopped at. */
+const pathOf = (exec: readonly number[], stop: number | null): number[] => (stop === null ? [...exec] : [...exec.filter((i) => i < stop), stop]);
+
+/** The line the run is on at `u`: nothing before it starts, nothing once it has finished (a run that stopped stays where it stopped). */
+export function cursorOf(exec: readonly number[], stop: number | null, u: number): number | null {
+  const path = pathOf(exec, stop);
+  const s = sweepAt(u);
+  if (path.length === 0 || s <= 0 || (stop === null && s >= 1)) return null;
+  return path[Math.min(path.length - 1, Math.floor(s * path.length))];
+}
+
+/** How much of a flag shows at `u`: a `cursor` flag as the cursor reaches its line, a `diff` flag once the run has returned. */
+export function flagAt(flag: LineFlag, exec: readonly number[], stop: number | null, u: number): number {
+  if (flag.at === 'diff') return ease(seg(u, 0.88, 1.08));
+  const path = pathOf(exec, stop);
+  const k = Math.max(0, path.filter((i) => i <= flag.line).length - 1);
+  const t = 0.05 + 0.8 * ((k + 0.5) / Math.max(1, path.length));
+  return ease(seg(u, t, t + 0.12));
+}
+
 // ── the change set, for review ─────────────────────────────────────────────
 
 export interface ReviewCard {
@@ -307,7 +385,7 @@ export interface ReviewCard {
   fields: number;
   /** What kinds of change there are, e.g. "tags on 33 resources · power state on 4". */
   summary: string;
-  rows: Array<{ name: string; type: string; changes: string }>;
+  rows: Array<{ name: string; type: string; changes: string; /** Something to say about the row beside it, in amber: the estate has moved on. */ note?: string }>;
   /** Resources not listed. */
   hidden: number;
 }

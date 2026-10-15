@@ -2,7 +2,7 @@
  * The screens of the tour, in the order the talk takes them. One list, so the step bar, the presenter's rail and
  * the keys that cross from one screen to the next can never disagree about what comes after what.
  *
- * There are two talks. The tour is seven screens, about twenty minutes. The workshop is the same seven with three
+ * There are two talks. The tour is eight screens, about twenty-two minutes. The workshop is the same eight with three
  * more around them (a welcome, a screen to work on, and the questions) for ninety. A visitor is in one or the other
  * (see `format.ts`), and `screensOf` is the list that visitor walks.
  */
@@ -26,23 +26,24 @@ export interface TourScreen {
   mark?: Mark;
 }
 
-/** The tour: seven screens. */
+/** The tour: eight screens. */
 export const SCREENS: readonly TourScreen[] = [
   { id: 'estate', n: 1, href: '/tour/estate', end: '/tour/estate?lens=context', title: 'The estate', hint: '194 things, many ways to look' },
   { id: 'tools', n: 2, href: '/tour/tools', end: '/tour/tools?step=999', title: 'Naive tools', hint: 'One call at a time' },
   { id: 'strains', n: 3, href: '/tour/strains', end: '/tour/strains?at=10', title: 'Where it strains', hint: 'Each question strains the tools somewhere else' },
   { id: 'language', n: 4, href: '/tour/language', end: '/tour/language?rung=code', title: 'A language', hint: 'The catalogue grows up' },
   { id: 'object', n: 5, href: '/tour/object', end: '/tour/object?step=10', title: 'The object', hint: 'Reshape the estate into plain data' },
-  { id: 'code', n: 6, href: '/tour/code', end: '/tour/code?ex=break&step=2', title: 'Code surface', hint: 'Programs over the object' },
-  { id: 'results', n: 7, href: '/tour/results', end: '/tour/results?show=why', title: 'Results', hint: 'How each method holds up as the model gets weaker' }
+  { id: 'code', n: 6, href: '/tour/code', end: '/tour/code?ex=lookup&step=2', title: 'Code surface', hint: 'Programs over the object' },
+  { id: 'guard', n: 7, href: '/tour/guard', end: '/tour/guard?at=6', title: 'Security and writes', hint: 'Six gates between a program and the estate' },
+  { id: 'results', n: 8, href: '/tour/results', end: '/tour/results?show=why', title: 'Results', hint: 'How each method holds up as the model gets weaker' }
 ];
 
 const WELCOME: TourScreen = { id: 'welcome', mark: 'welcome', href: '/tour/welcome', end: '/tour/welcome?at=2', title: 'Welcome', hint: 'What you leave with, and how we will work' };
 const TURN: TourScreen = { id: 'turn', mark: 'turn', href: '/tour/turn', end: '/tour/turn?ex=rule&step=1', title: 'Your turn', hint: 'Change a program, predict what moves' };
 const WRAP: TourScreen = { id: 'wrap', mark: 'wrap', href: '/tour/wrap', end: '/tour/wrap?at=2', title: 'Questions', hint: 'What to take away, then your questions' };
 
-/** The workshop: the tour, with a welcome before it, a turn at the keyboard after the code surface, and the questions last. */
-export const WORKSHOP_SCREENS: readonly TourScreen[] = [WELCOME, ...SCREENS.slice(0, 6), TURN, SCREENS[6], WRAP];
+/** The workshop: the tour, with a welcome before it, a turn at the keyboard once the room has seen the gates, and the questions last. */
+export const WORKSHOP_SCREENS: readonly TourScreen[] = [WELCOME, ...SCREENS.slice(0, 7), TURN, SCREENS[7], WRAP];
 
 export const screensOf = (format: Format): readonly TourScreen[] => (format === 'workshop' ? WORKSHOP_SCREENS : SCREENS);
 

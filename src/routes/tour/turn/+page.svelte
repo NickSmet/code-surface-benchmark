@@ -211,7 +211,7 @@
     <BeatNav
       {at}
       beats={BEATS}
-      before={{ href: '/tour/code', label: 'The code surface' }}
+      before={{ href: '/tour/guard', label: 'Security and writes' }}
       after={{ href: '/tour/results', label: 'How it holds up' }}
       {nextLabel}
     />
