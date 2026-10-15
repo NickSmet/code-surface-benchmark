@@ -21,7 +21,7 @@ import { applyChangeRows } from '$lib/inventory/apply';
 import type { ChangeRow, ProjectionView } from '$lib/inventory/projection';
 import type { Inventory } from '$lib/inventory/types';
 import { INTERNAL_KEYS } from '$lib/inventory/types';
-import type { Decision } from './code-view';
+import { backToModelTokens, type Decision } from './code-view';
 import type { RunOutcome } from './code-run';
 import { runTracked } from './code-run';
 import {
@@ -661,10 +661,17 @@ export function buildGuard(input: GuardInput): GuardView {
   if (toReview && decision === 'declined') told = toldCard(declinedContent(), 'quiet', 'the model is told');
   else if (applied) told = toldCard(applied.content, applied.ok ? 'ok' : 'bad', applied.ok ? 'the model is told' : 'the model is told: not applied');
 
+  const counters =
+    toReview && decision === 'declined'
+      ? { ...example.counters, tokens: backToModelTokens({ ...shown, content: declinedContent() }), tokensSub: 'tokens: told not to retry' }
+      : applied && !applied.ok
+        ? { ...example.counters, usedSub: 'nothing was applied', tokens: backToModelTokens({ ...shown, content: applied.content }), tokensSub: 'tokens: the error it is told' }
+        : example.counters;
+
   const lead = leadOf({ beat, id: programOf(code)?.id ?? null, o: shown, hit, ruleOn, decision, applied, moved: stale?.resource ?? null, gates, absent });
   return {
     beat,
-    example: { ...example, question: ask, copy: {}, marks, answer, review, ret },
+    example: { ...example, question: ask, copy: {}, marks, counters, answer, review, ret },
     flags,
     stop,
     gates,

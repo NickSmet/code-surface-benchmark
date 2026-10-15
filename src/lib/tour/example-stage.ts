@@ -200,7 +200,13 @@ export function countersOf(o: RunOutcome, marks: Marks): Counters {
     reads: o.totals.propertyReads,
     usedLabel: writes ? 'proposed changes' : onGroups ? 'groups it used' : 'records it used',
     used: writes ? o.diff.length : onGroups ? marks.usedGroups.size : marks.used.size,
-    usedSub: writes ? `fields on ${plural(o.resourcesAffected, 'resource')}` : o.status !== 'ok' ? 'nothing was applied' : `of ${scanned.toLocaleString('en-US')} scanned`,
+    usedSub: writes
+      ? `fields on ${plural(o.resourcesAffected, 'resource')}`
+      : o.status !== 'ok'
+        ? 'nothing was applied'
+        : onGroups && resources > 0
+          ? `from ${scanned.toLocaleString('en-US')} scanned`
+          : `of ${scanned.toLocaleString('en-US')} scanned`,
     tokens: backToModelTokens(o),
     tokensSub: o.status !== 'ok' ? 'tokens: the error it is told' : writes ? 'tokens: the summary it needs' : 'tokens: only the answer'
   };

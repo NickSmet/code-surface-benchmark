@@ -55,11 +55,13 @@
       </div>
       <aside class="table" aria-label="The numbers behind the chart">
         <div class="picks">
-          <div class="pills" role="group" aria-label="Model">
-            {#each MODELS as m (m.key)}
-              <a class="pill mono" class:on={m.key === tb.model} href={chipHref(m.key, tb.set)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={m.key === tb.model ? 'true' : undefined}>{m.deployment}</a>
-            {/each}
-          </div>
+          {#if tb.set === 'unplanned'}
+            <div class="pills" role="group" aria-label="Model">
+              {#each MODELS as m (m.key)}
+                <a class="pill mono" class:on={m.key === tb.model} href={chipHref(m.key, tb.set)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={m.key === tb.model ? 'true' : undefined}>{m.deployment}</a>
+              {/each}
+            </div>
+          {/if}
           <div class="pills" role="group" aria-label="Tasks">
             {#each SETS as k (k)}
               <a class="pill" class:on={k === tb.set} href={chipHref(tb.model, k)} data-sveltekit-noscroll data-sveltekit-keepfocus aria-current={k === tb.set ? 'true' : undefined} title={TASK_SETS[k].note}>{TASK_SETS[k].label}</a>

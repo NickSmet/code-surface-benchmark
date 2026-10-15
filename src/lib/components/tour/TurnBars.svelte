@@ -23,13 +23,14 @@
   // A bar is one turn: what the model read (the big block) and, on top, what it wrote (amber).
   // Text that is new in a request is drawn in colour. Text the model already got in the request
   // before is the same shape in grey: a provider with prompt caching can reuse it.
-  // Amber is the model's own words: its call is output on the turn it is written, and input from
-  // the next turn on, when it is read back.
+  // Amber is the model's own words: bright gold when written as output at the top of a turn,
+  // and deep terracotta when the wrapped call is read back as input on the next turn.
   const OUT = '#f59e0b';
+  const CALLS_IN = '#9a3412';
   const FRESH: Record<PartKey, { label: string; color: string; hint: string }> = {
     fixed: { label: 'Setup', color: '#475569', hint: 'Instructions and tool definitions' },
     user: { label: 'Question', color: '#0ea5e9', hint: 'The question you asked' },
-    calls: { label: 'Calls', color: OUT, hint: 'The calls the model wrote on earlier turns, read back as input' },
+    calls: { label: 'Calls', color: CALLS_IN, hint: 'The calls the model wrote on earlier turns, wrapped in a message with their id and read back as input' },
     results: { label: 'Results', color: '#4f46e5', hint: 'What the tools sent back' }
   };
   const CACHED: Record<PartKey, string> = { fixed: '#e5e9f0', user: '#d5dbe5', calls: '#c4ccda', results: '#aeb8ca' };
@@ -78,7 +79,7 @@
   const summary = $derived(
     `Tokens read and written on each of ${turns.length} turns. ${turns
       .map((t) => `Turn ${t.n} reads ${n(t.promptTokens)} and writes ${n(t.completionTokens)}`)
-      .join('; ')}. Grey is input repeated from the previous turn; amber is what the model wrote.`
+      .join('; ')}. Grey is input repeated from the previous turn; amber is what the model wrote; terracotta is earlier calls read back as input.`
   );
 </script>
 
@@ -133,7 +134,11 @@
     <span class="lg-row">
       <span class="lg-h">Input</span>
       {#each PART_KEYS as k (k)}
-        <span class="lg" title={FRESH[k].hint}><span class="sw" style:background-color={FRESH[k].color}></span>{FRESH[k].label}</span>
+        {#if k === 'calls'}
+          <Tip class="lg" text={FRESH.calls.hint}><span class="sw" style:background-color={FRESH.calls.color}></span>{FRESH.calls.label}</Tip>
+        {:else}
+          <span class="lg" title={FRESH[k].hint}><span class="sw" style:background-color={FRESH[k].color}></span>{FRESH[k].label}</span>
+        {/if}
       {/each}
       <span class="lg-sep">
         <Tip class="lg" text={CACHE_TIP}><span class="sw hatch" style:background-color={CACHED.calls}></span>Cached</Tip>
@@ -141,7 +146,7 @@
     </span>
     <span class="lg-row">
       <span class="lg-h">Output</span>
-      <Tip class="lg" text={OUTPUT_TIP}><span class="sw" style:background-color={OUT}></span>What the model writes</Tip>
+      <Tip class="lg" text={OUTPUT_TIP}><span class="sw cap-sw" style:background-color={OUT}></span>What the model writes</Tip>
     </span>
   </figcaption>
 </figure>
@@ -333,5 +338,9 @@
     width: 10px;
     height: 10px;
     border-radius: 3px;
+  }
+  .sw.cap-sw {
+    border-radius: 3px 3px 1px 1px;
+    box-shadow: inset 0 -1.5px 0 rgba(255, 255, 255, 0.9);
   }
 </style>

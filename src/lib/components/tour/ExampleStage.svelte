@@ -130,6 +130,7 @@
       ? Math.round(sweep * c.scanned)
       : stage.glyphs.reduce((n, g) => n + (depth(g) > 0 && g.index < sweepN ? 1 : 0), 0)
   );
+  const readsShown = $derived(Math.round(sweep * c.reads));
   const usedShown = $derived(Math.round(settled * c.used));
   const tokensShown = $derived(answerA > 0.05);
 
@@ -284,7 +285,7 @@
         <rect width={TILE_W} height={TILE_H} rx="10" class="tile" />
         <text x="12" y="20" class="tile-label">scanned in the runtime</text>
         <text x="12" y="44" class="tile-value runtime">{scannedShown.toLocaleString('en-US')}{c.scannedUnit === 'groups' ? ' groups' : ''}</text>
-        <text x="12" y="58" class="tile-sub">{`${c.reads.toLocaleString('en-US')} field reads, no tokens`}</text>
+        <text x="12" y="58" class="tile-sub">{`${readsShown.toLocaleString('en-US')} field reads, no tokens`}</text>
       </g>
       <g transform="translate({CARD_X + TILE_W + TILE_GAP} {TILES_Y})">
         <rect width={TILE_W} height={TILE_H} rx="10" class="tile" />
@@ -295,7 +296,7 @@
       <g transform="translate({CARD_X + 2 * (TILE_W + TILE_GAP)} {TILES_Y})">
         <rect width={TILE_W} height={TILE_H} rx="10" class="tile" />
         <text x="12" y="20" class="tile-label">back to the model</text>
-        <text x="12" y="44" class="tile-value" class:sent={!bad} class:refused={bad}>{tokensShown ? `\u2248 ${fmtTokens(c.tokens)}` : '\u2013'}</text>
+        <text x="12" y="44" class="tile-value" class:sent={!bad && !failed} class:refused={bad || failed}>{tokensShown ? `\u2248 ${fmtTokens(c.tokens)}` : '\u2013'}</text>
         <text x="12" y="58" class="tile-sub">{c.tokensSub}</text>
       </g>
     </g>

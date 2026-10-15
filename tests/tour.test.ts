@@ -2558,6 +2558,8 @@ test('guard: a person decides, the decline is the loop\u2019s own note, and the 
   assert.equal(declined.applied, null);
   assert.equal(declined.told?.tone, 'quiet');
   assert.equal(declined.told!.lines.join(' ').replace(/\s+/g, ' '), `status: "declined" note: "${DECLINED_NOTE}"`);
+  assert.equal(declined.example.counters.tokensSub, 'tokens: told not to retry');
+  assert.ok(declined.example.counters.tokens < pending.example.counters.tokens, 'the refusal note is shorter than the write summary');
   assert.match(declined.lead, /^Declined: nothing changed\. The model is told not to retry this change set/);
   // Approved: the runtime's own write result goes back to the model, and the three resources carry the change in the copy.
   const approved = guardOf('review', 'narrow', { decision: 'approved' });
@@ -2608,6 +2610,9 @@ test('guard: approval is not the end, because applying checks the proposal again
   assert.deepEqual(refused.example.review!.rows.map((r) => [r.name, r.note]), [['ci-runner-02', undefined], ['ci-runner-04', 'already deallocated'], ['ci-runner-05', undefined]]);
   assert.equal(refused.told?.tone, 'bad');
   assert.equal(refused.told?.label, 'the model is told: not applied');
+  assert.equal(refused.example.counters.usedSub, 'nothing was applied');
+  assert.equal(refused.example.counters.tokens, backToModelTokens({ ...refused.raw, content: refused.applied!.content }));
+  assert.equal(refused.example.counters.tokensSub, 'tokens: the error it is told');
   assert.match(refused.lead, /^Not applied\. The change set was derived from an estate that has since moved, so nothing was written\./);
   // The same approval on the beat before it is not refused: the estate has not moved there.
   assert.equal(guardOf('review', 'narrow', { decision: 'approved' }).applied?.ok, true);
@@ -2958,6 +2963,7 @@ test('results: each beat has the sentence and the figures that belong to it, and
   assert.match(views.older.footnote, /Rings are hosted programmatic calling, run on the two newer models only\.$/);
   assert.match(views.dollars.footnote, /^80 runs a bar: 8 tasks, 10 runs each\./);
   assert.match(views.dollars.footnote, /Hosted programmatic calling, run on the two newer models only, got 79 to 80 of 80 and is left out\.$/);
+  assert.match(views.why.footnote, /^80 runs a method on each model: 8 tasks \(4 preset, 4 unplanned\), 10 runs each\./);
 });
 
 test('results: each beat\'s figures are the cells they quote', () => {

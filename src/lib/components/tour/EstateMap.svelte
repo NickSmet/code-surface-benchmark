@@ -132,8 +132,8 @@
       <section class="band" style:--n={sub.groups.length} aria-label={`Subscription ${sub.name}`}>
         <header class="band-head">
           <h2 class="band-name">{sub.name}</h2>
-          <span class="band-meta">
-            {sub.groups.length} resource groups · {fmtInt(sub.resourceCount)} resources · {usd0(sub.costMonthly)}/mo
+          <span class="band-meta" title={`$${sub.costMonthly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo`}>
+            {sub.groups.length} resource groups · {fmtInt(sub.resourceCount)} resources · &approx; {usd0(sub.costMonthly)}/mo
           </span>
         </header>
 

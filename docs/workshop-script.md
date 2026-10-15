@@ -510,7 +510,7 @@ Where it departs from the research's representative agenda: the demonstration st
 - The code surface does not win everywhere: cost by group is a tie, a single narrow lookup is a loss (1.4 times the tokens on ⑥; a direct call at about 0.6 times on ⑧, a different measure), and on the middle model the tuned catalogue called one by one is 6% cheaper per run. The screen shows each of these.
 - The sandbox is not a security boundary. Nothing here should be repeated as "safe".
 - The minutes are targets, written by reading the screens aloud. They have not been timed with an audience.
-- Checked in Chromium 149 only, on the production build, walking each format with the arrow key. Presenting, all 84 beats fit the window at 1512 × 820 and 1512 × 945, and with 9px taken off the width. Reading, they fit at 1512 × 945, also with 9px off. The 20-minute talk's 72 beats were walked the same way, with the same result. Another browser lays text out a little differently; if a beat scrolls there, zoom out.
+- Checked in Chromium 149 only, on the production build, walking each format with the arrow key. Presenting, all 84 beats fit the window at 1512 × 820 and 1512 × 945, and with 9px taken off the width. Reading, they fit at 1512 × 945, also with 9px off. The 22-minute talk's 72 beats were walked the same way, with the same result. Another browser lays text out a little differently; if a beat scrolls there, zoom out.
 
 ## Replay sheet
 

@@ -691,6 +691,9 @@ function footnoteOf(s: ResultsState): string {
     const k = SETS.preset.older.code!.runs;
     return `${k} runs a marker: 4 tasks, ${SOURCE.repetitions} runs each. Dollars are estimates from the tokens the provider reported, per 1,000 runs, failures included. Bars are 95% intervals. Rings are hosted programmatic calling, run on the two newer models only.`;
   }
+  if (s.beat === 'why') {
+    return `${n} runs a method on each model: ${SOURCE.tasks} tasks (4 preset, 4 unplanned), ${SOURCE.repetitions} runs each. Dollars are estimates from the tokens the provider reported, failures included. Hosted programmatic calling ran on the two newer models only (${words(h)} of ${n} right).`;
+  }
   return `${n} runs a bar: ${SOURCE.tasks} tasks, ${SOURCE.repetitions} runs each. Dollars are estimates from reported tokens, per 1,000 right answers, failures included. Hosted programmatic calling, run on the two newer models only, got ${words(h)} of ${n} and is left out.`;
 }
 

@@ -114,7 +114,7 @@ export function buildStrains(inv: Inventory, rungs: Rung[]): Strain[] {
       task: s.task,
       route: s.route,
       title,
-      asks: TASK_LABEL[s.task],
+      asks: s.id === 'fan-out' ? `${TASK_LABEL[s.task]} (same question)` : TASK_LABEL[s.task],
       replay,
       bill: runBill(replay),
       calls: replay.totals.calls,
