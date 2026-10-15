@@ -4,6 +4,7 @@
   import { X } from '@lucide/svelte';
   import { buildInventory } from '$lib/inventory/fixtures/builders';
   import { TASKS } from '$lib/tasks';
+  import BeatKeys from '$lib/components/tour/BeatKeys.svelte';
   import EstateMap, { type GroupPaint } from '$lib/components/tour/EstateMap.svelte';
   import Segmented from '$lib/components/tour/Segmented.svelte';
   import StatTile from '$lib/components/tour/StatTile.svelte';
@@ -14,6 +15,7 @@
   import { buildLenses, LENS_ORDER, TYPE_COLOR, type LensId } from '$lib/tour/lenses';
   import { needleFor } from '$lib/tour/needles';
   import { COLORS, KIND_LABEL, type Paint } from '$lib/tour/paint';
+  import { usePresenter } from '$lib/tour/presenter.svelte';
   import { estateDump, representationsFor } from '$lib/tour/representations';
   import { replayCatalog, taskPrompt } from '$lib/tour/scenarios';
   import { fmtTokens } from '$lib/tour/tokens';
@@ -152,10 +154,14 @@
     return `${u.name}${extra}${dumped || !what ? '' : `. ${lens.label}: ${what}`}`;
   }
 
+  const presenter = usePresenter();
+  /** The arrow keys walk the colourings and then the whole estate as the model is handed it; Shift jumps to that last one. */
+  const modeGroups = MODES.map((m) => (m === 'context' ? 'context' : 'lenses'));
+
   function onWindowKey(e: KeyboardEvent): void {
     const t = e.target instanceof HTMLElement ? e.target : null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || presenter.helpOpen) return;
     if (e.key === 'Escape') {
       if (pinnedId) pinnedId = null;
       else if (legendPinned) {
@@ -173,6 +179,7 @@
   <title>The estate · From tools to code surfaces</title>
 </svelte:head>
 <svelte:window onkeydown={onWindowKey} />
+<BeatKeys at={MODES.indexOf(mode)} groups={modeGroups} onstep={(i) => setLens(MODES[i])} />
 
 <div class="screen">
   <header class="top">

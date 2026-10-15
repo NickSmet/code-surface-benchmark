@@ -1,19 +1,14 @@
 <script lang="ts">
   import { page } from '$app/state';
-  import { ArrowUpRight } from '@lucide/svelte';
+  import { ArrowUpRight, Presentation } from '@lucide/svelte';
+  import { usePresenter } from '$lib/tour/presenter.svelte';
+  import { SCREENS, screenIndexOf } from '$lib/tour/screens';
 
   // `hint` is the tooltip: the bar stays one line tall so the screens below it can fit a laptop.
-  const steps = [
-    { href: '/tour/estate', title: 'The estate', hint: '194 things, many ways to look' },
-    { href: '/tour/tools', title: 'Naive tools', hint: 'One call at a time' },
-    { href: '/tour/strains', title: 'Where it strains', hint: 'Each question strains the tools somewhere else' },
-    { href: '/tour/language', title: 'A language', hint: 'The catalogue grows up' },
-    { href: '/tour/object', title: 'The object', hint: 'Reshape the estate into plain data' },
-    { href: '/tour/code', title: 'Code surface', hint: 'Programs over the object' },
-    { href: '/tour/results', title: 'Results', hint: 'How each method holds up as the model gets weaker' }
-  ];
+  const steps = SCREENS;
+  const presenter = usePresenter();
 
-  const currentIndex = $derived(steps.findIndex((s) => page.url.pathname.startsWith(s.href)));
+  const currentIndex = $derived(screenIndexOf(page.url.pathname));
 </script>
 
 <header class="tour-top">
@@ -35,8 +30,12 @@
     </ol>
   </nav>
 
+  <button type="button" class="present" onclick={() => presenter.toggle()} title="Present: a thin rail instead of this bar, no Back and Next, keys to move (P)" aria-label="Present (P)">
+    <Presentation size={15} />
+    <span class="present-label">Present</span>
+  </button>
   <a class="live" href="/">
-    Live benchmark
+    Live<span class="live-more">&nbsp;benchmark</span>
     <ArrowUpRight size={14} />
   </a>
 </header>
@@ -149,7 +148,8 @@
     color: var(--color-text-primary);
     white-space: nowrap;
   }
-  .live {
+  .live,
+  .present {
     display: inline-flex;
     align-items: center;
     gap: 3px;
@@ -161,14 +161,34 @@
     padding: 5px 9px;
     border-radius: 8px;
   }
-  .live:hover {
+  .present {
+    gap: 6px;
+    border: 0;
+    background: transparent;
+  }
+  .live:hover,
+  .present:hover {
     background: var(--color-brand-bg);
   }
 
-  /* Seven steps and the tagline need about 1590px. Without the tagline they need about 1425px; tighter pills and joints carry them down to about 1310px.
-     Each breakpoint keeps about 30px to spare for other fonts. Below 1340px the steps get a row of their own. */
-  @media (max-width: 1620px) {
+  /* Seven steps, the tagline and the Present icon need about 1630px. Without the tagline they need about 1470px; with "Live" for "Live benchmark" about 1385px;
+     tighter pills and joints carry them down to about 1310px. Each breakpoint keeps about 30px to spare for other fonts.
+     Below 1340px the steps get a row of their own. The Present button shows its label from 1740px up (about 90px against the icon's 30). */
+  @media (max-width: 1740px) {
+    .present-label {
+      display: none;
+    }
+    .present {
+      padding: 5px 7px;
+    }
+  }
+  @media (max-width: 1660px) {
     .brand-sub {
+      display: none;
+    }
+  }
+  @media (max-width: 1540px) {
+    .live-more {
       display: none;
     }
   }

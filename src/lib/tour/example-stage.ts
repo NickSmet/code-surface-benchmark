@@ -99,12 +99,14 @@ export interface ExampleBeat extends ExampleState {
   phase: Phase;
   href: string;
   caption: string;
+  /** The example the beat belongs to: Shift and an arrow jump from one example to the next. */
+  group: ExampleId;
 }
 
 /** Every beat of every example, in the order a talk walks them. */
 export function exampleBeats(): ExampleBeat[] {
   return EXAMPLES.flatMap((e) =>
-    e.phases.map((phase, step) => ({ id: e.id, step, phase, href: exampleHref(e.id, step), caption: `${e.label} \u00b7 ${PHASE_WORD[phase]}` }))
+    e.phases.map((phase, step) => ({ id: e.id, step, phase, href: exampleHref(e.id, step), caption: `${e.label} \u00b7 ${PHASE_WORD[phase]}`, group: e.id }))
   );
 }
 

@@ -1,6 +1,11 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
   import { ArrowLeft, ArrowRight } from '@lucide/svelte';
+  import { beatActionFor, moveFor, typingIn } from '$lib/tour/beat-keys';
+  import { usePresenter } from '$lib/tour/presenter.svelte';
+  import { crossTo } from '$lib/tour/screens';
 
   interface Link {
     href: string;
@@ -9,8 +14,8 @@
   interface Props {
     /** The beat the screen is on. */
     at: number;
-    /** One entry for each beat: the URL that shows it, and what the presenter is on there. */
-    beats: ReadonlyArray<{ href: string; caption: string }>;
+    /** One entry for each beat: the URL that shows it, and what the presenter is on there. Beats with the same `group` are jumped over together (Shift and an arrow); without one, a beat is a group of its own. */
+    beats: ReadonlyArray<{ href: string; caption: string; group?: string }>;
     /** Where Back goes from the first beat, and Next from the last: the screens on either side. */
     before?: Link;
     after?: Link;
@@ -19,7 +24,11 @@
   }
   let { at, beats, before, after, nextLabel }: Props = $props();
 
+  const presenter = usePresenter();
+  const stay = { noScroll: true, keepFocus: true } as const;
+
   const last = $derived(beats.length - 1);
+  const groups = $derived(beats.map((b) => b.group ?? b.caption));
   const back = $derived(at > 0 ? { href: beats[at - 1].href, label: 'Back', inScreen: true } : before ? { ...before, inScreen: false } : null);
   const forward = $derived(
     at < last
@@ -29,29 +38,32 @@
         : null
   );
 
-  const go = (link: { href: string; inScreen: boolean } | null) => {
-    if (link) void goto(link.href, link.inScreen ? { noScroll: true, keepFocus: true } : {});
-  };
+  // The presenter's rail fills as the screen is walked.
+  $effect(() => presenter.report({ at, count: beats.length }));
+  onMount(() => () => presenter.report(null));
 
-  const typing = (t: EventTarget | null): boolean =>
-    t instanceof HTMLElement && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName));
   const pressable = (t: EventTarget | null): boolean => t instanceof HTMLElement && ['A', 'BUTTON', 'SUMMARY'].includes(t.tagName);
 
-  function onkeydown(e: KeyboardEvent) {
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return;
-    if (e.key === 'ArrowRight' || e.key === 'PageDown' || (e.key === ' ' && !pressable(e.target))) {
-      e.preventDefault();
-      go(forward);
-    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-      e.preventDefault();
-      go(back);
-    } else if (e.key === 'Home' && at > 0) {
-      e.preventDefault();
-      void goto(beats[0].href, { noScroll: true, keepFocus: true });
-    } else if (e.key === 'End' && at < last) {
-      e.preventDefault();
-      void goto(beats[last].href, { noScroll: true, keepFocus: true });
+  /** Off the end of the screen. Read, it is the Back or Next link; presented, the neighbour is entered at its first beat going on and its last going back. */
+  function cross(delta: 1 | -1): void {
+    if (presenter.on) {
+      const next = crossTo(page.url.pathname, delta);
+      if (next) void goto(next.href, { noScroll: true });
+      return;
     }
+    const link = delta > 0 ? after : before;
+    if (link) void goto(link.href);
+  }
+
+  function onkeydown(e: KeyboardEvent) {
+    if (e.defaultPrevented || presenter.helpOpen || typingIn(e.target)) return;
+    const action = beatActionFor(e);
+    if (!action || (e.key === ' ' && pressable(e.target))) return;
+    const move = moveFor(action, at, groups);
+    if (!move) return;
+    e.preventDefault();
+    if ('to' in move) void goto(beats[move.to].href, stay);
+    else cross(move.cross);
   }
 </script>
 

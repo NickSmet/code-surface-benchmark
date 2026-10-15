@@ -27,15 +27,37 @@ The tour keeps two promises, and you should too. Screens ① to ⑥ show structu
 
 ## Running it
 
+### Presenter mode
+
+Press `P`, click **Present** in the step bar, or open any screen with `?mode=present`, and the page loses its chrome. The step bar becomes a rail four pixels tall along the top edge, one segment for each screen, the current one filling as you step through it. Every screen's Back and Next row goes. What they took goes to the stage, with the proportions it always had: on the code screen at 1512 × 820 the stage grows from 916 × 445 to 1200 × 583, and at 1512 × 945 it fills the width.
+
+The step bar comes back, larger than it is at rest, in two cases: for a moment when the talk moves to another screen, and while the pointer is at the top edge (the screens are links there too). `H` lists the keys, `F` goes full screen, `P` leaves. The choice is a cookie, so a reload and a new tab keep it; `?mode=read` turns it off from a link. Presenter mode is a way of showing the same screens, not other screens: every beat is the same URL in both.
+
+After a click, focus is let go of, so the next arrow key belongs to the talk and not to the tab you just clicked.
+
 ### Keys
 
-| Screen | Forward | Back | Also |
-|---|---|---|---|
-| ① | click **Next** | | `1` to `6` switch the colour lens; click a pod to pin it, `Esc` to let go |
-| ② | `→` steps, `Space` plays and pauses | `←` | `Home` is the start, `End` the answer turn |
-| ③ ④ ⑥ ⑦ | `→`, `PageDown`, `Space` (when focus is not on a link) | `←`, `PageUp` | `Home` first beat, `End` last beat; the dots under the screen jump to a beat |
-| ④ | as above | as above | `↑` and `↓` move between rungs |
-| ⑤ | `→`, `Space` plays the whole run and pauses it | `←` | `Home`, `End`; **Reshape**, **Describe** and **Read** jump between acts |
+The same on every screen, in both modes. Past the last step of a screen `→` goes on to the next screen, and at the first step `←` comes back to the end of the one before, so the whole talk is one run of keys: 65 presses from the first beat of the estate to the last of the results, with the replay on its first question.
+
+| Keys | Does |
+|---|---|
+| `→` `PageDown` `Space` | next step. A clicker that sends Page Up and Page Down works as it is |
+| `←` `PageUp` `Shift` `Space` | step back |
+| `Shift` `→` · `Shift` `←` | next or previous **group**: an example on ⑥, a turn of the model on ②, a part on ⑤, the ladder, the language and the last rung on ④, a row on ③ |
+| `Home` · `End` | first or last step of the screen |
+| `⌥` `→` `⌥` `←` · `⌘` `Shift` `→` `⌘` `Shift` `←` · `]` `[` | next or previous screen (`Alt` and `Ctrl` on Windows and Linux) |
+| `P` · `F` · `H` or `?` | presenter mode · full screen · the list of keys |
+
+What is particular to a screen:
+
+| Screen | Also |
+|---|---|
+| ① | the arrows walk the six lenses, `1` to `6` jump to one; click a pod to pin it, `Esc` to let go |
+| ② ⑤ | `Space` plays and pauses the replay instead of stepping |
+| ④ | `↑` and `↓` move between rungs |
+| ⑥ | in the last example, click in the program to edit it, `⌘` `Enter` (`Ctrl` `Enter`) runs it, `Esc` leaves the editor so the arrows step again |
+
+On ⑤ the groups are its three acts, on ② the turns of the model; on ① the six lenses are one group and the whole estate in context is another.
 
 ### State
 
@@ -47,7 +69,7 @@ On ③, ④, ⑥ and ⑦ each beat is a history entry, so the browser's Back but
 
 Beats animate for a second or two. Let the motion settle before you talk over the result. The screenshots here were taken with reduced motion on, so they show each beat's resting state.
 
-Nothing scrolls. Every beat of every screen was measured at 1512 × 945: the page is exactly the window's height. On a smaller window, zoom the browser out rather than scrolling.
+Nothing scrolls. All 66 beats were measured at 1512 × 945, and in presenter mode also at 1512 × 820, each also with 9px taken off the width for a classic scrollbar: the page is exactly the window's height. On a smaller window, zoom the browser out rather than scrolling.
 
 ---
 

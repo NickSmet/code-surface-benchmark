@@ -19,6 +19,21 @@
 
   let root = $state<HTMLElement | null>(null);
 
+  // When the selection changes, the new one pulses once: a change made from the keyboard can be seen from across a room.
+  let flash = $state(false);
+  let shown: T | undefined;
+  $effect(() => {
+    const now = value;
+    if (shown === undefined || shown === now) {
+      shown = now;
+      return;
+    }
+    shown = now;
+    flash = true;
+    const id = setTimeout(() => (flash = false), 900);
+    return () => clearTimeout(id);
+  });
+
   // Radio-group keyboard model: arrows move and select, one tab stop.
   function onkeydown(e: KeyboardEvent): void {
     const i = options.findIndex((o) => o.id === value);
@@ -34,7 +49,7 @@
   }
 </script>
 
-<div class="seg" class:sm={size === 'sm'} role="radiogroup" aria-label={label} bind:this={root} style:--accent={accent}>
+<div class="seg" class:sm={size === 'sm'} class:flash role="radiogroup" aria-label={label} bind:this={root} style:--accent={accent}>
   {#each options as o (o.id)}
     <button
       type="button"
@@ -90,5 +105,27 @@
     font-family: var(--font-mono);
     font-size: 11.5px;
     opacity: 0.65;
+  }
+
+  .flash button.on {
+    animation: pulse 0.9s ease-out;
+  }
+  @keyframes pulse {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent, var(--color-text-primary)) 55%, transparent);
+      transform: scale(1);
+    }
+    30% {
+      transform: scale(1.07);
+    }
+    100% {
+      box-shadow: 0 0 0 12px transparent;
+      transform: scale(1);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .flash button.on {
+      animation: none;
+    }
   }
 </style>

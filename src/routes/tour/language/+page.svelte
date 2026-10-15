@@ -133,7 +133,9 @@
     const r = rungOf(key)!;
     return `Rung ${r.n} \u00b7 ${r.title}`;
   };
-  const beats = $derived(BEAT_KEYS.map((key) => ({ href: hrefFor(key), caption: captionOf(key) })));
+  /** Shift and an arrow jump from one part of the screen to the next: the ladder, the language, the last rung. */
+  const groupOf = (key: BeatKey): string => (key === 'grow' || key === 'limits' ? 'language' : key === 'code' ? 'code' : 'ladder');
+  const beats = $derived(BEAT_KEYS.map((key) => ({ href: hrefFor(key), caption: captionOf(key), group: groupOf(key) })));
   const nextLabel = (i: number): string => {
     const key = BEAT_KEYS[i + 1];
     return `Next: ${key === 'grow' ? 'Grow the language' : key === 'limits' ? 'What it cannot answer' : rungOf(key)!.title}`;
@@ -309,7 +311,7 @@
 
 <header class="head" class:tiles={stage === 'grow'}>
   <div class="head-text">
-    <p class="t-kicker">
+    <p class="t-kicker t-chrome">
       ④ A catalogue that grows a language
       {#if originHref}<a class="back-origin" href={originHref}>← Back to where it strains</a>{/if}
     </p>
@@ -382,7 +384,7 @@
         {/each}
       </div>
       <p class="ladder-legend">
-        <b>Billed:</b> <RunLegend /> · a darker square is a bigger result · schema is the tool definitions, sent on every turn
+        <b>Billed:</b> <RunLegend /> · darker = bigger result · schema = tool definitions, sent every turn
       </p>
       <div class="story" aria-live="polite">
         <p class="story-k">{next ? `What pushes you from rung ${rung.n} to rung ${next.n}` : 'Where it lands'}</p>

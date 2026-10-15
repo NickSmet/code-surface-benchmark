@@ -155,6 +155,9 @@
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
       void runBreak();
+    } else if (e.key === 'Escape') {
+      // Leave the editor, so the arrow keys step through the talk again.
+      (e.currentTarget as HTMLElement).blur();
     }
   }
 
@@ -192,7 +195,6 @@
       accent="var(--color-brand)"
       options={EXAMPLES.map((e) => ({ id: e.id, label: e.label }))}
     />
-    <p class="t-lead" aria-live="polite">{lead}</p>
   </header>
 
   <section class="t-panel ask" aria-label="The question">
@@ -220,6 +222,8 @@
       </div>
     </div>
   </section>
+
+  <p class="t-lead caption" aria-live="polite">{lead}</p>
 
   <section class="strip" aria-label="What it comes to">
     {#if isBreak}
@@ -325,9 +329,10 @@
     gap: 2px 14px;
     min-width: 0;
   }
-  .top .t-lead {
-    grid-column: 1 / -1;
-    /* Two lines is the longest narration; reserve them so the stage below never jumps. */
+  /* What is happening, under the picture it is happening in. Two lines is the longest narration; reserve them so the stage above never jumps. */
+  .caption {
+    margin: -3px 0;
+    max-width: none;
     min-height: 2.8em;
   }
 
@@ -584,5 +589,29 @@
     margin-top: auto;
     padding: 6px 0 2px;
     background: linear-gradient(to top, var(--color-page-bg) 75%, transparent);
+  }
+
+  /* Presented, the question, the narration and the strip are as tight as they can be and still read from the back of a room,
+     and the stage, which keeps its proportions, takes everything they leave. */
+  :global(.tour.present) .ask {
+    /* Two lines of the question, and its border: the longest it gets, kept so the stage is the same size for every example. */
+    min-height: 48px;
+    padding: 4px 12px;
+  }
+  :global(.tour.present) .stage-panel {
+    padding: 3px;
+  }
+  :global(.tour.present) .caption {
+    margin: -2px 0;
+    font-size: 15px;
+    color: var(--color-text-secondary);
+  }
+  :global(.tour.present) .strip {
+    height: 66px;
+  }
+  :global(.tour.present) .lang-col {
+    gap: 2px;
+    padding: 5px 10px;
+    line-height: 1.3;
   }
 </style>
