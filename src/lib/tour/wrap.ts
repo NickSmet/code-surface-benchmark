@@ -9,6 +9,7 @@ import type { Inventory } from '$lib/inventory/types';
 import type { TaskId } from './answers';
 import { backToModelTokens } from './code-view';
 import { runTracked, type RunRequest } from './code-run';
+import { DROPPED_FIELDS, PRODUCTION_RULE, PROGRAMS, evaluateRule } from './guard';
 import { FRESH_QUESTIONS, runQuery } from './language';
 import type { CodeProgram } from './programs';
 import { costFacts } from './replay-view';
@@ -31,13 +32,16 @@ export interface Sources {
   projection: RunRequest['projection'];
 }
 
-/** The five lines of the recap, from the runs they summarise. */
+/** The six lines of the recap, from the runs they summarise. */
 export function recapOf({ programs, inv, projection }: Sources): Recap[] {
   const run = replayCatalog({ task: 'granular-read' });
   const answer = run.turns[run.turns.length - 1].completionTokens;
   const refused = FRESH_QUESTIONS.filter((q) => !runQuery(inv, q.query, new Set()).ok).length;
   const cost = runTracked({ code: programs['filter-aggregate'].code, projection });
   const tag = runTracked({ code: programs['bulk-write'].code, projection, rationale: programs['bulk-write'].rationale });
+  // The guard screen's own story: the program that stops the three most expensive VMs, and the rule that reads its change set.
+  const reach = runTracked({ code: PROGRAMS.reach.code, projection });
+  const hit = evaluateRule(PRODUCTION_RULE, reach.diff, projection);
   const older = othersSpan(['older']);
   const code = codeSpan(MODELS);
   const runs = cellOf('older', CODE).runs;
@@ -61,6 +65,10 @@ export function recapOf({ programs, inv, projection }: Sources): Recap[] {
     },
     {
       screens: [7],
+      text: `A program reads only the projection, with ${DROPPED_FIELDS.length} internal fields left out. A write is a change set the runtime derives, so a rule of yours can read it. The one we showed refused ${hit?.offenders.length ?? 0} of ${hit?.total ?? 0} power changes in Production. What passes goes to a person as a diff, and is checked again as it lands.`
+    },
+    {
+      screens: [8],
       text: `${code.min === code.max ? `${code.min}` : `${code.min} to ${code.max}`} of ${runs} on all three models. On the older one the other methods got ${older.min} to ${older.max}. A narrow lookup is the exception: a direct call costs ${REPORTED.lookupDirectCallTokens} the tokens.`
     }
   ];
@@ -88,22 +96,22 @@ export const ASKS: readonly Ask[] = [
   {
     title: 'What can a program see?',
     because: 'The projection decides what exists: shape it, name its references, leave the internal fields out.',
-    screens: [5]
+    screens: [5, 7]
   },
   {
     title: 'What can it change, and who approves?',
-    because: 'A short allowlist, a change set the runtime derives from before and after, and a person who says yes.',
-    screens: [6]
+    because: 'A short allowlist, a change set the runtime derives from before and after, rules of your own over that change set, a person who sees the diff, and a check again as it lands.',
+    screens: [6, 7]
   },
   {
     title: 'Where does the code run?',
     because: 'Not in this demo\u2019s executor, which is not a security sandbox. Production needs an isolated process, container or microVM, with credentials kept outside it.',
-    screens: [6]
+    screens: [7]
   },
   {
     title: 'What did you measure, on your model?',
     because: 'The weaker the model, the wider the gap. Run your own questions against your own estate before you decide.',
-    screens: [7]
+    screens: [8]
   }
 ];
 

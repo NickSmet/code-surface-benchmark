@@ -1,13 +1,14 @@
 <script lang="ts">
   /**
    * The code screen's stage with a program the room can edit: the same picture, in the same proportions, with a
-   * text box laid over the program's panel so a change is typed where the program is drawn.
+   * text box laid over the program's panel so a change is typed where the program is drawn. With `editable` off it is the
+   * picture alone, so a screen can use the one stage for the program it plays and the program the room types.
    *
    * The geometry is the code screen's, number for number: the stage keeps its 1400 x 680 proportions and takes the
    * largest size that fits, and the text box sits on the panel at the stage's own left edge, line height and size.
    */
   import ExampleStage from './ExampleStage.svelte';
-  import type { ExampleView } from '$lib/tour/example-stage';
+  import type { ExampleView, LineFlag, Told } from '$lib/tour/example-stage';
   import type { ObjectStage } from '$lib/tour/object-stage';
 
   interface Props {
@@ -19,11 +20,34 @@
     label: string;
     /** The program in the text box. */
     code: string;
+    /** The text box is there. Without it the stage draws the program itself. */
+    editable?: boolean;
     running?: boolean;
+    /** What a person decided about the change set. */
+    decision?: 'pending' | 'approved' | 'declined';
+    /** The lines the run flagged. */
+    flags?: LineFlag[];
+    /** The line a run stopped on. */
+    stop?: number | null;
+    /** What the model is told once a person has decided. */
+    told?: Told | null;
     /** Control or Command plus Enter in the text box. */
     onrun?: () => void;
   }
-  let { stage, view, u, label, code = $bindable(), running = false, onrun }: Props = $props();
+  let {
+    stage,
+    view,
+    u,
+    label,
+    code = $bindable(),
+    editable = true,
+    running = false,
+    decision = 'pending',
+    flags = [],
+    stop = null,
+    told = null,
+    onrun
+  }: Props = $props();
 
   function onkeydown(e: KeyboardEvent): void {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -39,18 +63,20 @@
 <section class="t-panel stage-panel" aria-label="A program running on the estate object">
   <div class="stage-wrap">
     <div class="stage-box">
-      <ExampleStage {stage} {view} {u} {label} editing {running} />
-      <textarea
-        class="editor"
-        aria-label="The program. Press Control or Command plus Enter to run it."
-        spellcheck="false"
-        autocomplete="off"
-        autocapitalize="off"
-        wrap="off"
-        bind:value={code}
-        {onkeydown}
-        style:--lh={view.lineHeight}
-      ></textarea>
+      <ExampleStage {stage} {view} {u} {label} {decision} editing={editable} {running} {flags} {stop} {told} />
+      {#if editable}
+        <textarea
+          class="editor"
+          aria-label="The program. Press Control or Command plus Enter to run it."
+          spellcheck="false"
+          autocomplete="off"
+          autocapitalize="off"
+          wrap="off"
+          bind:value={code}
+          {onkeydown}
+          style:--lh={view.lineHeight}
+        ></textarea>
+      {/if}
     </div>
   </div>
 </section>

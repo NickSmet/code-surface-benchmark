@@ -4,7 +4,7 @@
 
   /**
    * What goes in the circle of a step: the screen's number, or, on the three screens that only the workshop has and
-   * that must not take a number from the seven, a small picture.
+   * that must not take a number from the eight, a small picture.
    */
   let { screen, size = 14 }: { screen: TourScreen; size?: number } = $props();
 </script>

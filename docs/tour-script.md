@@ -5,9 +5,9 @@ The script for `/tour`. It walks every screen the way a presenter would: what to
 **Flow:** `problem-demo-architecture-next` (the `presentation-narrative` skill): technical audience, demo and walkthrough.
 **Audience:** engineers who design the tools an agent calls.
 **Thesis:** stop adding tools. Give the model a designed view of the data as one plain object and let it write the program. The weaker the model, the more that matters.
-**Length:** about 20 minutes at a talking pace; book 25 for questions. Seven screens, 66 beats. Roughly half the beats are stops (stay and talk) and half are passes (one sentence, then on). A 10-minute cut is at the end.
-**The ask:** end on screen 7 and run the live benchmark yourself, on your own provider.
-**Setup:** `npm run dev`, a browser at 1512 × 945 and 100% zoom, open `http://localhost:5173/tour/estate`. Nothing here calls a model: screens 1 to 6 replay scripted runs over real tool results, and screen 7 reads a snapshot of saved benchmark runs.
+**Length:** about 22 minutes at a talking pace; book 30 for questions. Eight screens, 72 beats. Roughly half the beats are stops (stay and talk) and half are passes (one sentence, then on). A 10-minute cut is at the end.
+**The ask:** end on screen 8 and run the live benchmark yourself, on your own provider.
+**Setup:** `npm run dev`, a browser at 1512 × 945 and 100% zoom, open `http://localhost:5173/tour/estate`. Nothing here calls a model: screens 1 to 6 replay scripted runs over real tool results, screen 7 runs real programs through the benchmark's projection and change contract (what the model writes is still scripted), and screen 8 reads a snapshot of saved benchmark runs.
 
 ## The argument in one page
 
@@ -18,18 +18,19 @@ The script for `/tour`. It walks every screen the way a presenter would: what to
 | ③ | Where it strains | Each question strains the tools somewhere else | Complication | Four questions strain the catalogue in four places, each has a usual fix, and a narrow question strains nothing. | 4:10 |
 | ④ | A language | Every fix adds vocabulary | The fixes add up | The fixes add up to a query language, and it stops where somebody stopped building it. | 3:10 |
 | ⑤ | The object | Stop adding tools. Reshape the estate. | Resolution | Give the model the data as one plain object, tell it the shape once, and it writes the program; only the answer comes back. | 2:40 |
-| ⑥ | Code surface | Any question is one program | The same machine, pushed | The same one tool takes a sum, a write for review, two questions nobody planned for, and attempts to break it. | 3:30 |
-| ⑦ | Results | A weaker model breaks the other methods. Not this one. | Evidence and the ask | The code surface gets 80 of 80 on all three models; the other five methods fall as the model gets weaker. | 2:45 |
+| ⑥ | Code surface | Any question is one program | The same machine, pushed | The same one tool takes a sum, a write for review, two questions nobody planned for, and a lookup it loses. | 2:50 |
+| ⑦ | Security and writes | The model proposes. Six gates decide. | The same machine, made safe to run | Six gates sit between a program and the estate: what exists, what runs, what may change, a rule of yours, a person's review, and a second check as the change lands. | 2:30 |
+| ⑧ | Results | Change the model. The code surface stays at 100%. | Evidence and the ask | The code surface gets every preset task right on all three models, while the other methods' accuracy follows the model and their cost follows the question. | 3:15 |
 
-About 19:50 (the optional beat on screen 2 is in it), plus 0:45 if you take the calculator detour on screen 3.
+About 22:10 (the optional beat on screen 2 is in it), plus 0:45 if you take the calculator detour on screen 3.
 
-The tour keeps two promises, and you should too. Screens ① to ⑥ show structure, not measurement: the model's choices are scripted, the tool results are real, so they show calls, turns and tokens and never claim a failure rate. Screen ⑦ is the only place with measured results, and it says how they were measured.
+The tour keeps two promises, and you should too. Screens ① to ⑦ show structure, not measurement: the model's choices are scripted, the tool results and every refusal are real, so they show calls, turns, tokens and what a gate does, and never claim a failure rate. Screen ⑧ is the only place with measured results, and it says how they were measured.
 
 ## Running it
 
 ### Presenter mode
 
-Press `P`, click **Present** in the step bar, or open any screen with `?mode=present`, and the page loses its chrome. The step bar becomes a rail four pixels tall along the top edge, one segment for each screen, the current one filling as you step through it. Every screen's Back and Next row goes. What they took goes to the stage, with the proportions it always had: on the code screen at 1512 × 820 the stage grows from 916 × 445 to 1200 × 583, and at 1512 × 945 it fills the width.
+Press `P`, click **Present** in the step bar, or open any screen with `?mode=present`, and the page loses its chrome. The step bar becomes a rail four pixels tall along the top edge, one segment for each screen, the current one filling as you step through it. Every screen's Back and Next row goes. What they took goes to the stage, with the proportions it always had: on the code screen at 1512 × 820 the stage grows from 916 × 445 to 1199 × 582, and at 1512 × 945 it grows to 1457 wide, nearly the whole width.
 
 The step bar comes back, larger than it is at rest, in two cases: for a moment when the talk moves to another screen, and while the pointer is at the top edge (the screens are links there too). `H` lists the keys, `F` goes full screen, `P` leaves. The choice is a cookie, so a reload and a new tab keep it; `?mode=read` turns it off from a link. Presenter mode is a way of showing the same screens, not other screens: every beat is the same URL in both.
 
@@ -37,7 +38,7 @@ After a click, focus is let go of, so the next arrow key belongs to the talk and
 
 ### Keys
 
-The same on every screen, in both modes. Past the last step of a screen `→` goes on to the next screen, and at the first step `←` comes back to the end of the one before, so the whole talk is one run of keys: 65 presses from the first beat of the estate to the last of the results, with the replay on its first question.
+The same on every screen, in both modes. Past the last step of a screen `→` goes on to the next screen, and at the first step `←` comes back to the end of the one before, so the whole talk is one run of keys: 71 presses from the first beat of the estate to the last of the results, with the replay on its first question.
 
 | Keys | Does |
 |---|---|
@@ -55,7 +56,7 @@ What is particular to a screen:
 | ① | the arrows walk the six lenses, `1` to `6` jump to one; click a pod to pin it, `Esc` to let go |
 | ② ⑤ | `Space` plays and pauses the replay instead of stepping |
 | ④ | `↑` and `↓` move between rungs |
-| ⑥ | in the last example, click in the program to edit it, `⌘` `Enter` (`Ctrl` `Enter`) runs it, `Esc` leaves the editor so the arrows step again |
+| ⑦ | on the last beat, click in the program to edit it, `⌘` `Enter` (`Ctrl` `Enter`) runs it, `Esc` leaves the editor so the arrows step again |
 
 On ⑤ the groups are its three acts, on ② the turns of the model; on ① the six lenses are one group and the whole estate in context is another.
 
@@ -63,13 +64,13 @@ On ⑤ the groups are its three acts, on ② the turns of the model; on ① the 
 
 Every beat is a URL, and screens read the URL when they open. Paste a URL to land on a beat (the replay sheet below lists them all). Inside a page, move with keys and clicks: they keep the URL in step, but editing the query string of a page you are already on will not move it.
 
-On ③, ④, ⑥ and ⑦ each beat is a history entry, so the browser's Back button steps back one beat. ①, ② and ⑤ update the URL in place, so Back leaves the screen; use `←` there. Screen ③ is the one built to be walked both ways: a row's fix stays once you have moved on, and `←` hides only the fix you are leaving.
+On ③, ④, ⑥, ⑦ and ⑧ each beat is a history entry, so the browser's Back button steps back one beat. ①, ② and ⑤ update the URL in place, so Back leaves the screen; use `←` there. Screen ③ is the one built to be walked both ways: a row's fix stays once you have moved on, and `←` hides only the fix you are leaving.
 
 ### Pace and motion
 
 Beats animate for a second or two. Let the motion settle before you talk over the result. The screenshots here were taken with reduced motion on, so they show each beat's resting state.
 
-Nothing scrolls. All 66 beats were measured at 1512 × 945, and in presenter mode also at 1512 × 820, each also with 9px taken off the width for a classic scrollbar: the page is exactly the window's height, with one exception. In reading mode at 9px narrower, ③ beat 7 is 0.3px taller than the window (a line of the sample JSON wraps once more), which is enough for a classic scrollbar to show. On a smaller window, zoom the browser out rather than scrolling.
+Nothing scrolls. All 72 beats were walked with the arrow key on the production build and measured at 1512 × 945, and in presenter mode also at 1512 × 820, each also with 9px taken off the width for a classic scrollbar: on every one the page is exactly the window's height. That was checked in Chromium 149 only. On a smaller window, or in another browser that lays text out a little differently, zoom out rather than scrolling.
 
 ---
 
@@ -121,7 +122,7 @@ Nothing scrolls. All 66 beats were measured at 1512 × 945, and in presenter mod
 | 4 | Optional. Click **Filter + aggregate** and flip **Route** between Broad list and Verify each VM; click **Bulk write**. Press `End` each time. | The same question is 1 call or 19, depending on the route. Bulk write is 38 calls, one write per resource. | "Same tools, bigger questions. The aggregate takes one call or nineteen, depending on which route the model picks. The bulk write takes thirty-eight, one per resource. Screen 3 lines them up." | 0:25 |
 | 5 | Click **Next · Where it strains**. | | "That was one run each. Let us put the questions side by side." | 0:05 |
 
-**Speaker notes.** Keep "turn" and "call" apart out loud: a turn is one request to the model, and its bill contains everything said so far; calls made in the same turn share it. If someone asks whether a real model behaves like this, the **How honest is this replay?** link above the chart is the answer: the scripts add numbers exactly and never mis-copy, how often a live model slips depends on the model, and screen 7 has the measured runs. Do not say the model gets the sum wrong here; the replay does not claim it.
+**Speaker notes.** Keep "turn" and "call" apart out loud: a turn is one request to the model, and its bill contains everything said so far; calls made in the same turn share it. If someone asks whether a real model behaves like this, the **How honest is this replay?** link above the chart is the answer: the scripts add numbers exactly and never mis-copy, how often a live model slips depends on the model, and screen 8 has the measured runs. Do not say the model gets the sum wrong here; the replay does not claim it.
 
 ![② beat 1: the question, before anything is called](tour-script/s2-start.jpg)
 
@@ -213,7 +214,7 @@ Then click **Fix them one at a time** for screen 4.
 
 Then click **Reshape the estate into an object** for screen 5.
 
-**Speaker notes.** The honest line is the box on rung 8: the code surface is not the cheapest on this question and the talk never says it is. The case is breadth (beat 9) and, at the end, weaker models (screen 7). The number to keep straight: 1,312 is instructions plus the tool, 1,041 is the tool's definition alone, and 987 is the query tool with join and update on. The code tool's definition is longer than the six narrow tools' (1,041 against 733 tokens): you pay it every turn, but it does not grow with the questions.
+**Speaker notes.** The honest line is the box on rung 8: the code surface is not the cheapest on this question and the talk never says it is. The case is breadth (beat 9) and, at the end, weaker models (screen 8). The number to keep straight: 1,312 is instructions plus the tool, 1,041 is the tool's definition alone, and 987 is the query tool with join and update on. The code tool's definition is longer than the six narrow tools' (1,041 against 733 tokens): you pay it every turn, but it does not grow with the questions.
 
 ![④ beat 1: rung 1, a tool per property, 58 calls](tour-script/s4-1-rung1.jpg)
 
@@ -274,7 +275,7 @@ Then **Next · Code surface** for screen 6.
 
 ## ⑥ Code surface: any question is one program
 
-**Key message.** The same object and the same one tool take a sum, a write for review and questions nobody planned for. The contract decides what a program can see, change and run.
+**Key message.** The same object and the same one tool take a sum, a write for review and questions nobody planned for, and where a narrow tool is cheaper the screen says so.
 **Visual.** `[DIAGRAM: the program on the left, the same object on the right, scan counters and the bill underneath]`
 
 **Supporting points**
@@ -282,9 +283,9 @@ Then **Next · Code surface** for screen 6.
 - Tag and deallocate: a rule, not a list. 70 field changes on 37 resources, ≈ 97 tokens back, applied only after review.
 - Disks of stopped VMs and cost per vCPU: questions the query language could not take. Nothing was added to the tool surface.
 - A narrow lookup: a narrow tool does it for less. The screen says so.
-- Try to break it: internal fields do not exist, fields outside an allowlist are read-only, runs get a time limit.
+- The write ends at a person's review here. What stands between a program and the estate is the next screen.
 
-Each example is three beats: **Write**, **Run**, **Answer**. The write example has a fourth, **Review**. `→` steps through all 19; the picker at the top right jumps between examples. `?ex=` and `?step=` are in the URL.
+Each example is three beats: **Write**, **Run**, **Answer**. The write example has a fourth, **Review**. `→` steps through all 16; the picker at the top right jumps between examples. `?ex=` and `?step=` are in the URL.
 
 | # | Do | Point at | Say | Hold |
 |---|---|---|---|---|
@@ -304,13 +305,10 @@ Each example is three beats: **Write**, **Run**, **Answer**. The write example h
 | 14 | `→` (**Next example: A narrow lookup**). | The 10-line program. | "A narrow question: how many resource groups does Production have, and what are they called? Ten lines, and not one resource record involved." | 0:08 |
 | 15 | `→`. | Counters: "6 groups" read, "3 of 6" used. | "It reads six resource groups and no resource record. Three of them are Production's." | 0:08 |
 | 16 | `→`. | Back to the model ≈ 42 tokens. The strip: Catalogue best case 2,239 tokens, 1 call; Code surface 3,032 tokens, 1 call. "Here the catalogue wins: the code surface is billed 1.4× the tokens of one narrow tool." | "Three names, 42 tokens. A narrow tool would have done this too, and for less: the code surface is billed 1.4 times as much here, because it has to describe the whole object first. I would rather show you where it does not win." | 0:14 |
-| 17 | `→` (**Next example: Try to break it**). The See beat has **Read internal fields** loaded. | The program reads `vm._internalId` and `vm._billingAccount`. Back to the model: only `name`. The lead: "They are not blocked; they do not exist." | "Now try to break it. Read internal fields. The projection left them out before the code ran, so they are not blocked. They do not exist." | 0:13 |
-| 18 | `→` (**Next: Change**). **Change a cost** is loaded. Optional: click **Add a tag** and **Stop a VM** (allowed, one field on one resource, proposed for review), then **Tag with a number**, **Invent a field**, **Delete a resource** (refused). | Red box, ≈ 27 tokens: "error: web-prod-03: costMonthly is read-only". The counters: "Records it used", "0", "nothing was applied". | "Change a cost: every field outside the allowlist is read-only. One bad edit rejects the whole proposal, and nothing is applied." | 0:13 |
-| 19 | `→` (**Next: Do**). **Loop forever** is loaded; click **Call the network** too. | Red box: "Stopped after 1500 ms. The run took too long, so its worker was terminated." For the network: "Network APIs are not on the allowlist." | "Loop forever: runs get a time limit, the worker is terminated and nothing else is affected." On the network probe, read the screen's own words: "Demo-level only: this runtime is not a security boundary." | 0:14 |
 
-Then **How it holds up** for screen 7. In any beat you can edit the program in the dark panel and press **Run** (`Ctrl/⌘+Enter`) to try your own.
+Then **Security and writes** for screen 7.
 
-**Speaker notes.** Be straight about the scoreboard on this screen, because the audience can see it. Cost by group is a tie, the lookup is a loss (1.4×), the tag question is the clear token win, and what the code surface buys you on the rest is breadth: no new feature, no calculator, no per-resource writes. Approve and Decline act on the tour's own copy of the estate only. Never call the sandbox safe: the screen says it is not a security boundary, and the README's "Execution and isolation" section says what a production boundary needs.
+**Speaker notes.** Be straight about the scoreboard on this screen, because the audience can see it. Cost by group is a tie, the lookup is a loss (1.4×), the tag question is the clear token win, and what the code surface buys you on the rest is breadth: no new feature, no calculator, no per-resource writes. Approve and Decline act on the tour's own copy of the estate only. End the screen on the review and let the question come: what stops a program from writing something it should not? That is the next screen.
 
 ![⑥ beat 1: cost by group, the program](tour-script/s6-cost-write.jpg)
 
@@ -328,46 +326,95 @@ Then **How it holds up** for screen 7. In any beat you can edit the program in t
 
 ![⑥ beat 16: a narrow lookup, where the catalogue wins](tour-script/s6-lookup-answer.jpg)
 
-![⑥ beat 17: try to break it, read internal fields](tour-script/s6-break-see.jpg)
+---
 
-![⑥ beat 18: change a cost, refused, nothing applied](tour-script/s6-break-change.jpg)
+## ⑦ Security and writes: six gates between a program and the estate
 
-![⑥ beat 19: loop forever, the worker is terminated](tour-script/s6-break-do.jpg)
+**Key message.** The program only meets the estate through gates, and every gate answers in a line the model can read, so a refusal starts a retry and does not end the run. What exists and what may change are the benchmark's own contract. A rule of yours is the third gate, a person the fourth, and the write is checked again as it lands.
+**Visual.** `[DIAGRAM: the program and the object of screen 6, a strip of six gates above them that light up in turn, and under them what the model is told]`
+
+**Supporting points**
+- Read: the projection is built without `_internalId` and `_billingAccount`. A program that asks for them gets nothing: no error to catch, nothing to leak. The answer is ≈ 31 tokens.
+- Run: no network, a short list of globals and a clock. `fetch` is not a function, and a loop that never returns is stopped after 1,500 ms. This is a demo sandbox, not a security boundary.
+- Change: tags (string to string) and a VM's power state can change; everything else is read-only. One bad edit rejects the whole proposal, valid edits included, and the error names the field (≈ 27 tokens).
+- Rule: "No power-state change in Production without a person" reads the change set, not the code. "Stop the three most expensive running VMs" is valid and still refused, 3 of 3, and the refusal names the VMs (≈ 57 tokens). The rule is the tour's own: the benchmark's runtime has no such rule.
+- Review: narrowed to outside Production, the same ask passes and reaches a person as a diff: 3 resources, 3 fields. Approve and it lands in this copy of the estate; decline and the model is told not to retry.
+- Apply: approval is not the end. The change set is checked against the estate as it is now. While it waited, ci-runner-04 was deallocated by someone else, so nothing is written (`Stale or invalid power-state change`).
+
+**How it moves.** Over the stage there is a strip of the six gates, Read, Run, Change, Rule, Review and Apply, and **Try it**. A beat is the gate the program is up against: it opens on the program that shows it, and the buttons under the stage load the others. What you do on a beat belongs to it, so opening the next one starts clean. Every beat is in the URL as `?at=`. From beat 4 on it is one story: the model's first program is refused, it narrows, a person reviews, and the apply finds that the estate has moved.
+
+| # | Do | Point at | Say | Hold |
+|---|---|---|---|---|
+| 1 | Open `/tour/guard` (Read, the billing account), or **Security and writes** from beat 16 of screen 6. Optional: **Read internal fields**. | The strip: Read is the current gate. Line 5 is flagged "not in the projection". The answer: `name: "web-prod-03"`, and "_billingAccount is not in the result. Never in the object, so there was nothing to read." Back to the model ≈ 31 tokens. | "Same stage as the last screen, with six gates over it. The first is what exists. The estate does hold a billing account for this VM, but the projection was built without it, so the program reads nothing: no error to catch and nothing to leak. What is not in the projection does not exist for the program." | 0:15 |
+| 2 | `→`. Optional: **Loop forever**. | Line 3 is flagged "no network". The red box: `error: fetch is not a function`, ≈ 24 tokens. For the loop: "Stopped after 1500 ms. The run took too long, so its worker was terminated." The line under the stage: "A demo sandbox, a worker and a clock. Not a security boundary." | "Second is what may run. A program gets a short list of globals and no network, so the call fails on the line that makes it and the model reads why. A loop that never returns is stopped by a clock. And I will say what the screen says: this is a demo sandbox, not a security boundary." | 0:15 |
+| 3 | `→`. Optional: **Tag with a number**, **Invent a field**, **Delete a resource**. | Line 3 green, "allowed, dropped with the rest"; line 4 red, "read-only". The red box, ≈ 27 tokens: `error: web-prod-03: costMonthly is read-only`. | "Third is what may change: tags and power state, nothing else. One bad edit rejects the whole proposal, so the valid tag change goes down with it, and the model is told which field." | 0:20 |
+| 4 | `→`. Then click **Rule off**, and **Rule on** again. | The rule under the stage: "No power-state change in Production without a person", and under it "Yours to add: the benchmark's runtime has no such rule." Line 8 is flagged "3 of 3 refused by your rule"; three VMs are ringed in the strip. The red box, ≈ 57 tokens: `error: production-power: 3 of 3 changes set a power state in Production (sql-host-01, sql-host-02, sql-host-03). A person has to make those. Nothing was applied.` With the rule off: line 8 "goes to review", ≈ 68 tokens, a change set of three VMs waiting for a person. | "Fourth is yours: a rule over the change set. This program is valid, and it still stops, because the three most expensive running VMs are all in Production. The rule reads what the program would change, not how it is written, so it holds for any program. The refusal names the VMs, so the model can narrow. Rule off, and the same program passes everything and goes to a person: nothing but a person's eye between the model and those three VMs." | 0:30 |
+| 5 | `→`. Optional: **Decline**, then **Undo**. | Line 10 is flagged "goes to review". The change set: ci-runner-02, ci-runner-04, ci-runner-05, `powerState running → deallocated`, "3 resources, 3 fields", "waiting for a person". The ask now ends "The model has read the refusal, and tries again." After Decline: "Declined: nothing changed. The model is told not to retry this change set." | "Fifth is a person. The model read the refusal and tried again, outside Production. Every gate before the person is green now, and the change set reaches them as a diff: three resources, three fields. Nothing is applied until someone says so." | 0:25 |
+| 6 | `→`. Click **Approve and apply**. | The second row, ci-runner-04: "already deallocated". "approved, then refused: not applied". The box: `error: "Stale or invalid power-state change"  status: "not_applied"`. The bar: "Not applied. ci-runner-04 had already changed, so nothing was written." | "Sixth: approval is not the end. Applying checks the proposal against the estate as it is now. While it waited, someone else deallocated ci-runner-04, so nothing is written, and the model is told why. It can read again and propose again." | 0:25 |
+| 7 | `→` (**Try it**). Click a program, or click in the editor and change it, then `⌘` `Enter`. | The strip: the gate that stopped the program is red. The line under the stage says where: "Your program stopped at Rule: 3 of 3 changes set a power state in Production. Nothing was changed." | "Anything a program might try. Ask the room for one and run it. The gates decide what happens next." | 0:20 |
+
+Then **How it holds up** for screen 8.
+
+**Speaker notes.** Three things to keep straight. First, what is whose: the projection, the change contract and the apply check are the benchmark's own, and every program on the screen is really run through them; the Production rule, and the estate moving on under the change set, are the tour's, and the screen says so. Second, the contract catches ordinary programs; it is not a boundary against hostile code. The README's "Execution and isolation" section says what a production boundary needs: an isolated process or a capability-restricted runtime, with the credentials and the commit path outside it. Never call the sandbox safe. Third, the model's second program (beat 5) is chosen by the tour; the refusal it answers is the real one. Keep the order: the gates are in the order a program meets them, and the last one, the check as the change lands, is the one people forget.
+
+![⑦ beat 1: the billing account is not in the projection, so there is nothing to read](tour-script/s7-1-read.jpg)
+
+![⑦ beat 2: no network, the call fails on its own line](tour-script/s7-2-run.jpg)
+
+![⑦ beat 3: a cost is read-only, and the valid tag change goes down with it](tour-script/s7-3-change.jpg)
+
+![⑦ beat 4: a rule of yours refuses 3 of 3, and names the VMs](tour-script/s7-4-rule.jpg)
+
+![⑦ beat 4 with the rule off: the same program goes to a person](tour-script/s7-4b-rule-off.jpg)
+
+![⑦ beat 5: narrowed to outside Production, the change set waits for a person](tour-script/s7-5-review.jpg)
+
+![⑦ beat 6: approved, then refused, because the estate moved on](tour-script/s7-6-apply.jpg)
+
+![⑦ beat 7: try it, and see which gate stops the program](tour-script/s7-7-try.jpg)
 
 ---
 
-## ⑦ Results: a weaker model breaks the other methods, not this one
+## ⑧ Results: change the model, the code surface stays at 100%
 
-**Key message.** Across three models the code surface gets 80 of 80 right on all of them and is the cheapest right answer on each. The other five methods fall as the model gets weaker.
-**Visual.** `[CHART: three panels, one per model, six methods each; the bar is right answers out of 80, the figure beside it is dollars per 1,000 right answers]`
+**Key message.** The code surface gets every preset task right on all three models. The other methods' accuracy follows the model, and what a right answer costs follows both the model and the question.
+**Visual.** `[CHART: right answers out of 40 against estimated dollars per 1,000 runs on a log scale, one marker for each method; the markers glide from one model to the next]`
 
 **Supporting points**
-- Every bar is 80 runs: 8 tasks, 10 repetitions. Pink is the wrong answers.
-- Newer models (gpt-6-luna, gpt-5.6-luna): the other five methods get 76 to 80 of 80. Accuracy hardly separates them, so cost does: $0.286 and $0.744 per 1,000 right answers for the code surface, against $0.387 and $0.838 for the next cheapest.
-- Older model (gpt-5.4-mini): the code surface is still 80 of 80 ($2.66 per 1,000 right). The other five fall to between 39 and 56 of 80 (next cheapest $4.09 at 56).
-- A better model and a better method are separate effects and they multiply: 13.3× × 4.90× = 65.4× per right answer between the dearest and the cheapest.
+- Every marker is 40 runs: 4 tasks, 10 repetitions. Bars are 95% intervals. Dollars are estimates from the tokens the provider reported, failures included.
+- Older model (gpt-5.4-mini): the code surface is the only method at 40 of 40, at $2.57 per 1,000 runs. The other five get 21 to 30 of 40, at $2.55 to $6.02.
+- Newer model (gpt-5.6-luna), 3.75 times cheaper per token: everything moves left and up. The code surface is still at 40 of 40, but it is not the cheapest: the tuned catalogue called one by one is 6% under it, at 39 of 40 ($0.729 against $0.777).
+- Newest model (gpt-6-luna): five methods at 40 of 40, so price decides, and the code surface is the cheapest again: $0.278 against $0.337 for the next.
+- Four questions written after the tool sets were frozen: the tuned catalogue called one by one goes from $0.337 to $1.37 per 1,000 runs (4.05×); the code surface from $0.278 to $0.293.
+- A better model and a better method are separate effects and they multiply, over all eight tasks: 13.3× × 4.90× = 65.4× per right answer ($18.7, $1.40 and $0.286 per 1,000).
 - Why it holds is a reading, not a measurement. The screen says which is which.
 
 | # | Do | Point at | Say | Hold |
 |---|---|---|---|---|
-| 1 | Open `/tour/results`, or **How it holds up** from screen 6. | Two panels lit (gpt-6-luna, gpt-5.6-luna), the third held back ("Next: the older model"). The six methods in three groups: Catalogue (called one by one, plus a calculator, called from a program), Tuned catalogue (called one by one, called from a program), Code surface (a program per question). Tiles: Code surface 80 of 80; the other five 76–80 of 80; cheapest right answer. | "Start with the two newer models. Almost every method works: the other five get 76 to 80 right out of 80, and the code surface gets 80. Accuracy hardly separates them, so cost does: 29 cents per thousand right answers on the newest model, against 39 cents for the next cheapest." | 0:40 |
-| 2 | `→` (**Next: an older model**), or **An older model**. | The third panel lights: gpt-5.4-mini. Pink is the wrong answers: the bars shorten, 39, 49, 56, 54, 49 of 80. The code surface stays 80 of 80, $2.66. The tile: next cheapest $4.09 at 56 of 80. | "Now an older, smaller model. The code surface is still at 80 of 80. The other five methods fall to between 39 and 56. This is the point of the talk: as the model gets weaker the catalogue approaches fall, and the code surface does not." | 0:45 |
-| 3 | `→` (**Next: what a right answer costs**), or the **Dollars** switch. | The dollars per 1,000 right answers enlarge. The tiles: 13.3× for the model alone, 4.90× for the method alone, 65.4× together. | "What a right answer costs, failures included: the code surface is the cheapest on all three models. A better model and a better method are separate effects, and they multiply. Between the dearest and the cheapest right answer it is 65 times." | 0:30 |
-| 4 | `→` (**Next: why it holds**), or the **Why it holds** switch. | Left: "Why the code surface holds", with each line tagged Reading or Measured. Right: "What this does not show". | "Why? A reading, not a measurement: models write code fluently, and the object tells them what the data looks like. Programs over the catalogue have nothing like that to read. And one thing we did measure: code alone did not hold. On the older model, programs over the catalogue got 56 of 80, and over the tuned catalogue 49. On the right, what this does not show." | 0:50 |
+| 1 | Open `/tour/results`, or **How it holds up** from screen 7. | The chart: right answers (the axis starts at 20%) against estimated dollars per 1,000 runs, log scale, left is cheaper. The code surface alone at the top, ringed. The table on the right: Catalogue 21, 29 and 30; Tuned 30 and 22; hosted programs "not run" (this model has none); Code surface 40 of 40, $2.57. Tiles: Code surface 40 of 40; The other five 21–30 of 40; Cheapest per run, Tuned catalogue one by one. | "An older, smaller model first: gpt-5.4-mini. Higher is more right answers, further left is cheaper. Only the code surface reaches the top: 40 of 40. The other five get between 21 and 30. And it is not the dear one: $2.57 per thousand runs, against $2.55 for the cheapest method, which gets 30 of 40." | 0:35 |
+| 2 | `→` (**Next: a newer model**), or the gpt-5.6-luna pill. | The markers glide left and up, with dotted lines back to where they were. The code surface is still at 100%, but a tuned-catalogue marker sits to the left of it: $0.729 against $0.777, at 39 of 40. The two hosted-program rings appear (this model offers them). Tiles: Code surface 40 of 40 at $0.777; The other seven 36–40 of 40; Cheapest per run, Tuned catalogue one by one. | "A newer model, and a strange generation. It costs 3.75 times less per token, so everything moves left, and it does the work better, so everything moves up. The code surface is still at 40 of 40, but it is not the cheapest here: the tuned catalogue, one call at a time, is six percent under it, and gets 39. I would rather show you that than skip it." | 0:35 |
+| 3 | `→` (**Next: the newest model**). | Five markers at 100%, the code surface furthest left at $0.278. Tiles: Code surface 40 of 40, $0.278; The other seven 36–40 of 40, $0.337 to $0.818; Cheapest per run, Code surface: "Next: tuned catalogue, one by one, $0.337, 21% more." | "The newest model costs seven and a half to nine times less per token than the first. Five methods now get 40 of 40, so accuracy no longer separates them. Price does, and the code surface is the cheapest again: 28 cents per thousand runs, against 34." | 0:25 |
+| 4 | `→` (**Next: questions nobody planned for**), or **Unplanned tasks** in the table. | The same model on four tasks written after the tool sets were frozen. The tuned catalogue called one by one jumps right: $0.337 → $1.37, 4.05×. The code surface barely moves: $0.278 → $0.293. The tile: Cheapest on unplanned tasks, Code surface. | "Same model, four questions nobody tuned a tool for. The best catalogue method goes from 34 cents to a dollar thirty-seven: four times. The code surface goes from 28 to 29 cents and still gets every one right. Programs over the catalogue hold their cost too; what gets expensive is the call-by-call way." | 0:30 |
+| 5 | `→` (**Next: what a right answer costs**), or **Dollars**. | Three bars on a log scale: $18.7, $1.40 and $0.286 per 1,000 right answers, with "13.3× cheaper: the model alone" and "4.90× cheaper: the method alone" between them. Tiles: 13.3× × 4.90× = 65.4×. | "Over all eight tasks, failures included, what a right answer costs. Moving to the newest model makes it thirteen times cheaper. Moving to the code surface, on that model, makes it nearly five times cheaper again. They multiply: sixty-five times between the older model with one-by-one calls and the newest with the code surface." | 0:25 |
+| 6 | `→` (**Next: why it holds**), or **Why it holds**. | Left: "Why the code surface holds", each line tagged Reading or Measured. Right: "What this does not show". | "Why? A reading, not a measurement: models write code fluently, and the object tells them what the data looks like. Programs over the catalogue have nothing like that to read. One thing we did measure: code alone did not hold. On the older model, programs over the catalogue got 56 of 80, and over the tuned catalogue 49. On the right, what this does not show." | 0:45 |
 
 Then **Run the live benchmark**: the ask.
 
-**What the right column says, so you can say it first.** On gpt-6-luna accuracy ties: the smallest p-value against the code surface is 0.12, so there it saves money, not mistakes. One mock estate of 194 resources, eight tasks, ten runs each: larger estates and other vendors' versions of programmatic calling are untested. A single narrow lookup is the one place a direct call wins, at about 0.6× the tokens. Dollars are estimates from the tokens the provider reported, not an invoice. Hosted programmatic calling, run on the two newer models only, got 79 to 80 of 80 and is left off the chart.
+**What the right column says, so you can say it first.** On gpt-6-luna accuracy ties: the smallest p-value against the code surface is 0.12, so there it saves money, not mistakes. On the two newer models, programs over the plain catalogue cost within 18% of the code surface on the unplanned tasks; most of that saving is a program instead of calls, and the object is what keeps it at the top on the older model. One mock estate of 194 resources, eight tasks, ten runs each: larger estates and other vendors' versions of programmatic calling are untested. A single narrow lookup is the one place a direct call wins, at about 0.6× the tokens. Dollars are estimates from the tokens the provider reported, not an invoice. Hosted programmatic calling, run on the two newer models only, got 79 to 80 of 80 over all eight tasks and is left out of beat 5.
 
-**Speaker notes.** The weaker-model result is the talk's strongest claim and the one thing that is measured. Say it in that order: measured first (beats 1 and 2), the reason second and labelled as a reading (beat 4). Do not say the code surface is more accurate on the newer models (it ties) or that code in general holds (it did not, without the object). The "pre-trained on code" explanation is yours to give, and the screen gives it as a reading beside the measured fact that programs over the catalogue did not hold.
+**Speaker notes.** The weaker-model result is the talk's strongest claim and the one thing that is measured. Take the models in order, because the beats are an argument: the older model first, with the code surface alone at the top; then the middle one, where it is not the cheapest, and say so before anybody else does; then the newest, where price decides. Do not say the code surface is more accurate on the newest model (accuracy ties there) or that code in general holds (on the older model, programs over the catalogue did not). The "pre-trained on code" explanation is yours to give, and the screen gives it as a reading beside the measured fact.
 
-![⑦ beat 1: the two newer models, where almost every method works](tour-script/s7-1-newer.jpg)
+![⑧ beat 1: the older model, where only the code surface reaches the top](tour-script/s8-1-older.jpg)
 
-![⑦ beat 2: the older model, where the other five methods fall](tour-script/s7-2-older.jpg)
+![⑧ beat 2: the middle model, where the code surface is no longer the cheapest](tour-script/s8-2-newer.jpg)
 
-![⑦ beat 3: dollars per 1,000 right answers, 13.3× × 4.90× = 65.4×](tour-script/s7-3-dollars.jpg)
+![⑧ beat 3: the newest model, where five methods tie and price decides](tour-script/s8-3-newest.jpg)
 
-![⑦ beat 4: why it holds, and what this does not show](tour-script/s7-4-why.jpg)
+![⑧ beat 4: four unplanned tasks, and one-by-one calls get four times dearer](tour-script/s8-4-unplanned.jpg)
+
+![⑧ beat 5: dollars per 1,000 right answers, 13.3× × 4.90× = 65.4×](tour-script/s8-5-dollars.jpg)
+
+![⑧ beat 6: why it holds, and what this does not show](tour-script/s8-6-why.jpg)
 
 ---
 
@@ -385,8 +432,9 @@ Every beat as a URL, so a replay can start anywhere. Paste into the address bar;
 | ④ | grow, with join and update on; limits; the way back to screen 3 | `/tour/language?stage=grow&f=join,update`; `/tour/language?stage=limits`; add `&from=strains:4` for the pill |
 | ⑤ | steps 1 to 11 | `/tour/object?step=0` to `/tour/object?step=10` |
 | ⑥ | cost, beats 1 to 3 | `/tour/code`, `/tour/code?step=1`, `/tour/code?step=2` |
-| ⑥ | the other examples (`ex` is `tag`, `disks`, `ratio`, `lookup`, `break`; `step` 0 to 2, and 0 to 3 for `tag`) | `/tour/code?ex=tag&step=3`, `/tour/code?ex=lookup&step=2`, `/tour/code?ex=break&step=1` |
-| ⑦ | beats 1 to 4 | `/tour/results`, `?show=older`, `?show=dollars`, `?show=why` |
+| ⑥ | the other examples (`ex` is `tag`, `disks`, `ratio`, `lookup`; `step` 0 to 2, and 0 to 3 for `tag`) | `/tour/code?ex=tag&step=3`, `/tour/code?ex=disks&step=2`, `/tour/code?ex=lookup&step=2` |
+| ⑦ | beats 1 to 7 | `/tour/guard`, then `/tour/guard?at=1` to `/tour/guard?at=6` |
+| ⑧ | beats 1 to 6 | `/tour/results`, `?show=newer`, `?show=newest`, `?show=unplanned`, `?show=dollars`, `?show=why` |
 
 ---
 
@@ -399,20 +447,23 @@ Every beat as a URL, so a replay can start anywhere. Paste into the address bar;
 | ③ | Jump with the dots (or `→` fast) to beats 1, 3, 5, 9 and 11. Skip the detour. | 2:00 |
 | ④ | Rung 1, rung 7, the limits stage, rung 8. | 1:30 |
 | ⑤ | Press `Space` at step 1 and talk over the run. | 0:40 |
-| ⑥ | Beat 3 (cost answer), beat 7 (review), beat 17 (break it). | 1:15 |
-| ⑦ | Beat 2 (the older model) and beat 3 (dollars). | 1:20 |
+| ⑥ | Beat 3 (cost answer) and beat 7 (review). | 0:45 |
+| ⑦ | Beats 3 (a cost is read-only), 4 (the rule) and 6 (the apply). | 1:15 |
+| ⑧ | Beats 1 (the older model), 2 (the middle one) and 5 (dollars). | 1:35 |
 
-About 8:25 plus transitions.
+About 9:25 plus transitions.
 
 ---
 
 ## Questions you will get
 
-**Isn't this just programmatic tool calling?** Screen 7's rows "Called from a program" are exactly that: programs over the catalogue tools. On the two newer models they do well (76 to 80 of 80) and cost little. On the older model they fall to 56, and to 49 over the tuned catalogue, while the code surface stays at 80. The reading is that the object tells the model what the data looks like and the catalogue gives it nothing to read. Hosted programmatic calling was run on the two newer models only (79 to 80 of 80) and is off the chart.
+**Isn't this just programmatic tool calling?** Screen 8's rows "From a program" are exactly that: programs over the catalogue tools. On the two newer models they do well (76 to 80 of 80) and cost between a quarter and a half of calling the same tools one by one. On the older model they fall to 56, and to 49 over the tuned catalogue, while the code surface stays at 80. The reading is that the object tells the model what the data looks like and the catalogue gives it nothing to read. Hosted programmatic calling was run on the two newer models only (79 to 80 of 80) and is off the chart.
 
-**Is the sandbox safe?** No claim is made. Screen 6 says "Demo-level only: this runtime is not a security boundary." The README's "Execution and isolation" section says what a production boundary needs. What the demo shows is the contract: what the model can see (the projection), what it can change (an allowlist and a change set for review) and what it can run (a time limit).
+**Is the sandbox safe?** No claim is made. Screen 7 says "This sandbox is a demo, a worker and a time limit, not a security boundary." The README's "Execution and isolation" section says what a production boundary needs. What the demo shows is the contract: what the model can see (the projection), what it can change (an allowlist and a change set for review) and what it can run (a time limit).
 
-**What about writes?** Screen 6, the tag example. The program proposes, the runtime computes the change set from a copy of the estate, and a person approves. Approve and Decline act on the tour's copy only.
+**What about writes?** Screens 6 and 7. On 6, the tag example: the program proposes, the runtime computes the change set from a copy of the estate, and a person approves. On 7, what else stands in the way: a contract on what can change, a rule of yours, and a check against the estate as it is when the change lands. Approve and Decline act on the tour's copy only. The Production rule is the tour's own; the benchmark's runtime has no such rule.
+
+**Where would my own rules go?** On the change set, not on the code. The rule on screen 7 reads what the program would change (which resource, which field, from what to what), so it holds for any program, including one nobody has written. In the tour it is one function over the change set; the benchmark's runtime has no hook for it.
 
 **Does it scale to a bigger estate?** Not measured. One mock estate, 194 resources. The runtime reads records without spending model tokens, but the shape of the data still has to fit in the tool definition.
 
@@ -432,14 +483,17 @@ Walking the tour as a talk showed where the narrative and the visuals disagreed.
 | ③ to ④ | **See the calculator** led to a screen that had to hold a lot of state, and there was no clean way back. | The link lands on rung 6 of the ladder, on one screen, with the pill "← Back to where it strains" returning to the same beat with the same rows solved. |
 | ④ | The screen did not fit: the ladder, the grow-a-language demo and the limits all lived on one page. | Ten beats on three stages, each exactly one screen tall. |
 | ⑥ | It read as a new page after ⑤ instead of its continuation. | Same two panels as ⑤, one example per Write, Run, Answer. |
-| End | The benchmarks were not at the end, and there was no measured claim anywhere. | Screen 7, the only measured one, built from a snapshot of saved runs on three models. |
-| ② | The lessons said the models were "off by 5–11% every time" and the bill "swung by 60%". Screen 7 shows newer models getting 76 to 77 of 80 on those methods, and the tour promises no failure rates before it. | The lessons are structural. The honesty note points to screen 7 for measured runs. |
+| End | The benchmarks were not at the end, and there was no measured claim anywhere. | Screen 8, the only measured one, built from a snapshot of saved runs on three models. |
+| ② | The lessons said the models were "off by 5–11% every time" and the bill "swung by 60%". Screen 8 shows the newer models getting 36 and 37 of 40 on those methods, and the tour promises no failure rates before it. | The lessons are structural. The honesty note points to screen 8 for measured runs. |
 | ③ | The calculator card quoted ≈ 5,450 against ≈ 2,688 while the row's own bill said ≈ 3,846: two totals for one question side by side. | The card quotes no bill; the ladder on screen 4 carries the comparison. |
 | ③ | The fan-out card said "58 calls to 1" next to a row that said 19 calls. | It says the ladder starts further back, with one tool per property, and labels both numbers. |
 | ⑥ | "The totals are exact", while the answer shows `688.3100000000001`. | "The program added the totals up, so there is no sum for the model to get wrong." |
-| ⑦ | A bullet pointed to "screen 6" for the narrow lookup at 0.6× the tokens; screen 6 shows 1.4× the other way, a different measure. | The pointer is gone. The claim stands on its own number. |
+| ⑧ | A bullet pointed to "screen 6" for the narrow lookup at 0.6× the tokens; screen 6 shows 1.4× the other way, a different measure. | The pointer is gone. The claim stands on its own number. |
 | ④ and ⑤ | Screen 4 called the code tool's description ≈ 1,041 tokens; screen 5 called the tool description ≈ 926. | Both say "tool definition, ≈ 1,041 tokens". A test pins the two sources to one number. |
-| README | The guided-tour paragraph said screens 1 to 5 are scripted and screen 7 is the exception, leaving screen 6 unaccounted for. | "Screens 1 to 6." |
+| README | The guided-tour paragraph said screens 1 to 5 are scripted and screen 7 is the exception, leaving screen 6 unaccounted for. | Screens 1 to 7 are scripted or run on the benchmark's own code; screen 8 is the exception. |
+| ⑥ and ⑦ | Try to break it was three more beats at the end of the code screen, and writes ended at "a person approves", so nothing showed what stands between a program and the estate. | It has a screen of its own, ⑦: six gates, one story of a refusal, a retry, a review and an apply that fails. ⑥ is 16 beats. |
+| ⑦ | A change set a person had approved looked finished. | Beat 6 stages an estate that moved on under it, and the benchmark's own apply check refuses it. |
+| ⑧ | The results were one view of 80-run bars, and the story of the weaker model lived in the speaker's head. | The benchmark's own plane of right answers against dollars, one panel that changes model: the older one, the middle one where the code surface is not the cheapest, the newest, then unplanned tasks, dollars and why. |
 
 ## Where the numbers come from
 
@@ -453,5 +507,7 @@ Walking the tour as a talk showed where the narrative and the visuals disagreed.
 | ≈ 1,041 tokens | ④, ⑤ | The code tool's definition: `JSON.stringify` of the tool schema at one token per four characters. 1,312 adds the instructions; 733 is the six narrow tools. |
 | ≈ 40 tokens back | ⑤ | The tool message of the reference program on the granular read. |
 | 70 field changes on 37 resources | ⑥ | The runtime's own before-and-after comparison on a copy. |
-| 80 runs per bar; right answers; dollars per 1,000 right | ⑦ | `src/lib/tour/results.ts`, a snapshot of `docs/runs/ptc-three-models-20261014/cost-results.json`. Priced from the tokens the provider reported; estimates, not an invoice. |
-| 13.3× × 4.90× = 65.4× | ⑦ | gpt-5.4-mini to gpt-6-luna on naive direct calls, per right answer (13.3×), then naive direct to the code surface on gpt-6-luna (4.90×). |
+| ≈ 31, 24, 27, 57, 68 and 71 tokens back | ⑦ | The tool message of each run, counted the way the code screen counts its answers. |
+| 3 of 3 (sql-host-01, -02, -03); ci-runner-02, -04, -05; ci-runner-04 moved | ⑦ | The rule's own run on the change set of the program. The VMs are the three most expensive running ones, first anywhere in the estate and then outside Production. That the estate moves on is the tour's staging; the check that refuses it is the benchmark's apply. |
+| 40 runs per marker, 80 per bar; right answers; dollars per 1,000 right | ⑧ | `src/lib/tour/results.ts`, a snapshot of `docs/runs/ptc-three-models-20261014/cost-results.json`. Priced from the tokens the provider reported; estimates, not an invoice. |
+| 13.3× × 4.90× = 65.4× | ⑧ | gpt-5.4-mini to gpt-6-luna on naive direct calls, per right answer (13.3×), then naive direct to the code surface on gpt-6-luna (4.90×). |

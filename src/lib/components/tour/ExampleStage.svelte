@@ -14,13 +14,18 @@
     answerAt,
     bodyBand,
     chromeAt,
+    cursorOf,
+    execLinesOf,
+    flagAt,
     lineAlpha,
     retBand,
     reviewAt,
     settledAt,
     sweepAt,
     wrapWords,
-    type ExampleView
+    type ExampleView,
+    type LineFlag,
+    type Told
   } from '$lib/tour/example-stage';
   import { fmtTokens } from '$lib/tour/tokens';
 
@@ -37,8 +42,14 @@
     editing?: boolean;
     /** A run is in flight. */
     running?: boolean;
+    /** The lines the run flagged, marked as the run reaches them. */
+    flags?: LineFlag[];
+    /** The line a run stopped on: the run's cursor ends there. */
+    stop?: number | null;
+    /** What the model is told once a person has decided, under the change set. */
+    told?: Told | null;
   }
-  let { stage, view, u, label, decision = 'pending', editing = false, running = false }: Props = $props();
+  let { stage, view, u, label, decision = 'pending', editing = false, running = false, flags = [], stop = null, told = null }: Props = $props();
 
   // ── motion ───────────────────────────────────────────────────────────────
   const total = $derived(stage.glyphs.length);
@@ -62,6 +73,38 @@
       ...(view.ret ? [{ block: view.ret, a: retA * 0.95 }] : [])
     ].filter((b) => b.a > 0.01)
   );
+
+  // ── the run's cursor, and the lines it flagged ───────────────────────────
+  const exec = $derived(execLinesOf(view.lines, view.body));
+  const cursorLine = $derived(cursorOf(exec, stop, u));
+  const marked = $derived(flags.map((f) => ({ f, a: flagAt(f, exec, stop, u) })).filter((m) => m.a > 0.01));
+  const toneAt = (i: number): string => marked.find((m) => m.f.line === i && m.a > 0.4)?.f.tone ?? '';
+
+  // How wide one character of the program is as this browser draws it, so an underline lands under the characters it means.
+  let charW = $state(7.5);
+  $effect(() => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    if (!ctx) return;
+    const family = getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace';
+    ctx.font = `500 12.5px ${family}`;
+    const w = ctx.measureText('0'.repeat(40)).width / 40;
+    if (w > 4 && w < 12) charW = w;
+  });
+
+  /** A wavy line from `x0` to `x1` at height `y`: the underline of a flag. */
+  function wave(x0: number, x1: number, y: number): string {
+    const step = 3.2;
+    let d = `M${x0.toFixed(1)} ${y.toFixed(1)}`;
+    let up = true;
+    for (let x = x0; x < x1 - 0.01; x += step) {
+      const w = Math.min(step, x1 - x);
+      d += ` q${(w / 2).toFixed(2)} ${up ? -2.2 : 2.2} ${w.toFixed(2)} 0`;
+      up = !up;
+    }
+    return d;
+  }
+  const PILL_H = 18;
+  const pillW = (f: LineFlag): number => Math.round(f.text.length * 6 + 20);
 
   // ── the object ───────────────────────────────────────────────────────────
   const depth = (g: Glyph): number => view.marks.depth[g.id] ?? 0;
@@ -102,10 +145,27 @@
   const LINE_Y0 = 52;
   const ANSWER_LINE = 19;
 
-  const bad = $derived(view.answer.tone === 'bad');
+  const tone = $derived(view.answer.tone);
+  const bad = $derived(tone === 'bad');
+  const answerFoot = $derived(view.answer.foot ? view.answer.foot.split('\n').flatMap((l) => wrapWords(l, 74)) : []);
+
+  // What a person decided, and what the model was told about it. A change set that was approved and then refused is not a change set that was applied.
+  const failed = $derived(told?.tone === 'bad');
   const decisionText = $derived(
-    decision === 'approved' ? 'approved: applied to this copy of the estate' : decision === 'declined' ? 'declined: nothing changed' : 'waiting for a person'
+    failed
+      ? 'approved, then refused: not applied'
+      : decision === 'approved'
+        ? 'approved: applied to this copy of the estate'
+        : decision === 'declined'
+          ? 'declined: nothing changed'
+          : 'waiting for a person'
   );
+  /** With the model's reply under it, the change set keeps three rows. */
+  const TOLD_PITCH = 15;
+  const toldH = $derived(told ? 24 + told.lines.length * TOLD_PITCH : 0);
+  const toldTop = $derived(ANSWER_H - 8 - toldH);
+  const reviewRows = $derived(view.review ? (told ? view.review.rows.slice(0, 3) : view.review.rows) : []);
+  const reviewHidden = $derived(view.review ? view.review.hidden + (view.review.rows.length - reviewRows.length) : 0);
 </script>
 
 <svg
@@ -130,8 +190,18 @@
       <rect x={PANEL.x + 5} y={lineTop(b.block[0]) - 1} width="3" height={(b.block[1] - b.block[0] + 1) * lh + 2} class="band-bar" opacity={b.a} />
     {/each}
 
+    <!-- the line the run is on, and the lines it flagged -->
+    {#if cursorLine !== null}
+      <rect x={PANEL.x + 5} y={lineTop(cursorLine)} width={PANEL.w - 10} height={lh} rx="3" class="cursor" />
+      <path d="M{PANEL.x + 7} {lineTop(cursorLine) + lh / 2 - 4.5} l6 4.5 l-6 4.5 z" class="cursor-mark" />
+    {/if}
+    {#each marked as m (m.f.line)}
+      <rect x={PANEL.x + 5} y={lineTop(m.f.line)} width={PANEL.w - 10} height={lh} rx="3" class="flag-band {m.f.tone}" opacity={m.a} />
+      <rect x={PANEL.x + 5} y={lineTop(m.f.line)} width="3" height={lh} class="flag-bar {m.f.tone}" opacity={m.a} />
+    {/each}
+
     {#each tokens as toks, i (i)}
-      <text x={PANEL.x + 16} y={lineTop(i) + lh * 0.7} class="gutter" opacity={lineAlpha(i, u)}>{i + 1}</text>
+      <text x={PANEL.x + 16} y={lineTop(i) + lh * 0.7} class="gutter {toneAt(i)}" opacity={lineAlpha(i, u)}>{i + 1}</text>
       <!-- while the program is being edited, a text box sits over this and draws the text itself -->
       {#if !editing}
         <text x={PANEL.x + CODE_X} y={lineTop(i) + lh * 0.7} class="code" opacity={lineAlpha(i, u)}>{#each toks as tk, k (k)}<tspan class={tk.cls}>{tk.text}</tspan>{/each}</text>
@@ -139,6 +209,19 @@
     {/each}
     {#each rationale as line, i (i)}
       <text x={PANEL.x + 16} y={lineTop(view.lines.length) + 16 + i * 16} class="code small comment" opacity={lineAlpha(view.lines.length, u)}>{`// ${line}`}</text>
+    {/each}
+
+    <!-- what the run said about each flagged line: an underline under the characters, and a note at the line's end -->
+    {#each marked as m (m.f.line)}
+      {@const pw = pillW(m.f)}
+      {@const py = lineTop(m.f.line) + (lh - PILL_H) / 2}
+      {#if m.f.col}
+        <path d={wave(PANEL.x + CODE_X + m.f.col[0] * charW, PANEL.x + CODE_X + m.f.col[1] * charW, lineTop(m.f.line) + lh * 0.7 + 3.4)} class="squiggle {m.f.tone}" opacity={m.a} />
+      {/if}
+      <g opacity={m.a} transform="translate(0 {(1 - m.a) * 4})">
+        <rect x={PANEL.x + PANEL.w - 14 - pw} y={py} width={pw} height={PILL_H} rx={PILL_H / 2} class="pill {m.f.tone}" />
+        <text x={PANEL.x + PANEL.w - 14 - pw / 2} y={py + 12.5} text-anchor="middle" class="pill-text {m.f.tone}">{m.f.text}</text>
+      </g>
     {/each}
   </g>
 
@@ -224,31 +307,43 @@
     </g>
 
     <g opacity={answerA * (1 - reviewA)} transform="translate(0 {(1 - answerA) * 10})">
-      <rect x={CARD_X} y={ANSWER_Y} width={CARD_W} height={ANSWER_H} rx="12" class="result-card" class:bad />
-      <rect x={CARD_X} y={ANSWER_Y} width="5" height={ANSWER_H} class="result-bar" class:bad />
-      <text x={CARD_X + 22} y={ANSWER_Y + 24} class="result-label" class:bad>{view.answer.label}</text>
-      <text x={CARD_X + CARD_W - 16} y={ANSWER_Y + 24} text-anchor="end" class="result-tokens" class:bad>{`\u2248 ${fmtTokens(view.answer.tokens)} tokens`}</text>
+      <rect x={CARD_X} y={ANSWER_Y} width={CARD_W} height={ANSWER_H} rx="12" class="result-card {tone}" />
+      <rect x={CARD_X} y={ANSWER_Y} width="5" height={ANSWER_H} class="result-bar {tone}" />
+      <text x={CARD_X + 22} y={ANSWER_Y + 24} class="result-label {tone}">{view.answer.label}</text>
+      <text x={CARD_X + CARD_W - 16} y={ANSWER_Y + 24} text-anchor="end" class="result-tokens {tone}">{`\u2248 ${fmtTokens(view.answer.tokens)} tokens`}</text>
       {#each view.answer.lines as line, i (i)}
-        <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 + i * ANSWER_LINE} class="result-json" class:bad>{line}</text>
+        <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 + i * ANSWER_LINE} class="result-json {tone}">{line}</text>
       {/each}
       {#if view.answer.more > 0}
         <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 + view.answer.lines.length * ANSWER_LINE} class="result-more">{`\u2026 and ${view.answer.more.toLocaleString('en-US')} more`}</text>
       {/if}
+      {#each answerFoot as line, i (i)}
+        <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 + (view.answer.lines.length + (view.answer.more > 0 ? 1 : 0)) * ANSWER_LINE + 10 + i * 16} class="result-foot {tone}">{line}</text>
+      {/each}
     </g>
 
     {#if view.review}
       <g opacity={reviewA} transform="translate(0 {(1 - reviewA) * 10})">
         <rect x={CARD_X} y={ANSWER_Y} width={CARD_W} height={ANSWER_H} rx="12" class="review-card" />
-        <rect x={CARD_X} y={ANSWER_Y} width="5" height={ANSWER_H} class="review-bar" class:declined={decision === 'declined'} />
+        <rect x={CARD_X} y={ANSWER_Y} width="5" height={ANSWER_H} class="review-bar" class:declined={decision === 'declined' && !failed} class:failed />
         <text x={CARD_X + 22} y={ANSWER_Y + 24} class="review-label">change set, for review</text>
-        <text x={CARD_X + CARD_W - 16} y={ANSWER_Y + 24} text-anchor="end" class="review-state" class:declined={decision === 'declined'}>{decisionText}</text>
-        {#each view.review.rows as r, i (r.name)}
-          <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 - 4 + i * 17} class="review-row"><tspan class="rn">{r.name}</tspan><tspan class="rc" dx="14">{r.changes}</tspan></text>
+        <text x={CARD_X + CARD_W - 16} y={ANSWER_Y + 24} text-anchor="end" class="review-state" class:declined={decision === 'declined' && !failed} class:failed>{decisionText}</text>
+        {#each reviewRows as r, i (r.name)}
+          <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 - 4 + i * 17} class="review-row"><tspan class="rn">{r.name}</tspan><tspan class="rc" dx="14">{r.changes}</tspan>{#if r.note}<tspan class="rs" dx="14">{r.note}</tspan>{/if}</text>
         {/each}
-        {#if view.review.hidden > 0}
-          <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 - 4 + view.review.rows.length * 17} class="result-more">{`\u2026 and ${view.review.hidden.toLocaleString('en-US')} more resources`}</text>
+        {#if reviewHidden > 0}
+          <text x={CARD_X + 22} y={ANSWER_Y + LINE_Y0 - 4 + reviewRows.length * 17} class="result-more">{`\u2026 and ${reviewHidden.toLocaleString('en-US')} more resources`}</text>
         {/if}
-        <text x={CARD_X + 22} y={ANSWER_Y + ANSWER_H - 12} class="review-sum">{`${view.review.resources} resources, ${view.review.fields} fields  \u00b7  ${view.review.summary}`}</text>
+        {#if told}
+          <!-- what the person's decision sends back to the model -->
+          <rect x={CARD_X + 14} y={ANSWER_Y + toldTop} width={CARD_W - 28} height={toldH} rx="8" class="told-card {told.tone}" />
+          <text x={CARD_X + 26} y={ANSWER_Y + toldTop + 16} class="told-label {told.tone}">{told.label}</text>
+          {#each told.lines as line, i (i)}
+            <text x={CARD_X + 26} y={ANSWER_Y + toldTop + 24 + (i + 1) * TOLD_PITCH - 3} class="told-json {told.tone}">{line}</text>
+          {/each}
+        {:else}
+          <text x={CARD_X + 22} y={ANSWER_Y + ANSWER_H - 12} class="review-sum">{`${view.review.resources} resources, ${view.review.fields} fields  \u00b7  ${view.review.summary}`}</text>
+        {/if}
       </g>
     {/if}
   </g>
@@ -494,6 +589,169 @@
     font: 500 12px var(--font-mono);
     fill: #64748b;
   }
+  /* an answer that came back with something left out: not a failure, and not the whole story */
+  .result-card.note {
+    fill: #fffbeb;
+    stroke: #fde68a;
+  }
+  .result-bar.note {
+    fill: #d97706;
+  }
+  .result-label.note,
+  .result-tokens.note {
+    fill: #b45309;
+  }
+  .result-json.note {
+    fill: #78350f;
+  }
+  /* a note back to the model that is not a result: a person said no */
+  .result-card.quiet {
+    fill: #f1f5f9;
+    stroke: #cbd5e1;
+  }
+  .result-bar.quiet {
+    fill: #94a3b8;
+  }
+  .result-label.quiet,
+  .result-tokens.quiet {
+    fill: #475569;
+  }
+  .result-json.quiet {
+    fill: #334155;
+  }
+  .result-foot {
+    font: 600 12px var(--font-sans);
+  }
+  .result-foot.note {
+    fill: #b45309;
+  }
+  .result-foot.bad {
+    fill: #b91c1c;
+  }
+
+  /* ── the run's cursor and the lines it flagged ── */
+  .cursor {
+    fill: #fff;
+    fill-opacity: 0.1;
+  }
+  .cursor-mark {
+    fill: #5eead4;
+  }
+  .flag-band {
+    fill-opacity: 0.2;
+  }
+  .flag-band.bad {
+    fill: #ef4444;
+    fill-opacity: 0.26;
+  }
+  .flag-band.note {
+    fill: #f59e0b;
+    fill-opacity: 0.18;
+  }
+  .flag-band.ok {
+    fill: #34d399;
+    fill-opacity: 0.13;
+  }
+  .flag-bar.bad {
+    fill: #f87171;
+  }
+  .flag-bar.note {
+    fill: #fbbf24;
+  }
+  .flag-bar.ok {
+    fill: #34d399;
+  }
+  .gutter.bad {
+    fill: #fca5a5;
+    font-weight: 800;
+  }
+  .gutter.note {
+    fill: #fcd34d;
+    font-weight: 800;
+  }
+  .gutter.ok {
+    fill: #6ee7b7;
+    font-weight: 800;
+  }
+  .squiggle {
+    fill: none;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .squiggle.bad {
+    stroke: #f87171;
+  }
+  .squiggle.note {
+    stroke: #fbbf24;
+  }
+  .pill {
+    stroke: rgba(15, 23, 42, 0.5);
+    stroke-width: 1;
+  }
+  .pill.bad {
+    fill: #dc2626;
+  }
+  .pill.note {
+    fill: #b45309;
+  }
+  .pill.ok {
+    fill: #047857;
+  }
+  .pill-text {
+    font: 700 10.5px var(--font-sans);
+    fill: #fff;
+  }
+  .pill-text.note {
+    fill: #fffbeb;
+  }
+  .pill-text.ok {
+    fill: #d1fae5;
+  }
+
+  /* what comes back once a person has decided */
+  .told-card {
+    stroke-width: 1;
+  }
+  .told-card.ok {
+    fill: #d1fae5;
+    stroke: #6ee7b7;
+  }
+  .told-card.bad {
+    fill: #fef2f2;
+    stroke: #fecaca;
+  }
+  .told-card.quiet {
+    fill: #e2e8f0;
+    stroke: #cbd5e1;
+  }
+  .told-label {
+    font: 700 10.5px var(--font-sans);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .told-label.ok {
+    fill: #047857;
+  }
+  .told-label.bad {
+    fill: #b91c1c;
+  }
+  .told-label.quiet {
+    fill: #475569;
+  }
+  .told-json {
+    font: 600 12px var(--font-mono);
+    white-space: pre;
+  }
+  .told-json.ok {
+    fill: #064e3b;
+  }
+  .told-json.bad {
+    fill: #7f1d1d;
+  }
+  .told-json.quiet {
+    fill: #334155;
+  }
 
   /* ── the change set ── */
   .review-card {
@@ -508,6 +766,9 @@
   .review-bar.declined {
     fill: #94a3b8;
   }
+  .review-bar.failed {
+    fill: #dc2626;
+  }
   .review-label {
     font: 700 11px var(--font-sans);
     letter-spacing: 0.07em;
@@ -520,6 +781,13 @@
   }
   .review-state.declined {
     fill: #64748b;
+  }
+  .review-state.failed {
+    fill: #b91c1c;
+  }
+  .rs {
+    fill: #b45309;
+    font: 700 11.5px var(--font-sans);
   }
   .review-row {
     font: 600 12.5px var(--font-mono);

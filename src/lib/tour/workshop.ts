@@ -37,65 +37,73 @@ export const BLOCKS: readonly Block[] = [
     screen: 'estate',
     title: 'The estate and one question',
     from: 3,
-    to: 9,
+    to: 8,
     gist: '194 resources, wired together. One question needs 3 of them.',
     ask: 'How many of the 194 records does "power state and public IP of web-prod-03" need?'
   },
   {
     screen: 'tools',
     title: 'One tool call at a time',
-    from: 9,
-    to: 21,
+    from: 8,
+    to: 19,
     gist: 'Three calls, three turns, and every turn pays again for the whole transcript.',
     ask: 'The answer is 14 tokens. Before the last turn: roughly how many tokens does the run bill?'
   },
   {
     screen: 'strains',
     title: 'Where it strains',
-    from: 21,
-    to: 28,
+    from: 19,
+    to: 26,
     gist: 'Four questions strain the catalogue in four places, and every fix is vocabulary.',
     ask: 'For each problem, before the fix: what would you add to the tool?'
   },
   {
     screen: 'language',
     title: 'A language',
-    from: 28,
-    to: 36,
+    from: 26,
+    to: 33,
     gist: 'The fixes add up to a query language, and it stops where somebody stopped building it.',
     ask: 'Four questions nobody planned for: how many does the language answer as first built?'
   },
   {
     screen: 'object',
     title: 'The object',
-    from: 36,
-    to: 43,
+    from: 33,
+    to: 40,
     gist: 'The estate as one plain object, its shape told once. Only the answer comes back.',
     ask: 'The program reads all 194 records. How many reach the model?'
   },
   {
     screen: 'code',
     title: 'Programs over the object',
-    from: 43,
-    to: 54,
+    from: 40,
+    to: 48,
     gist: 'A sum, a write for review, two questions nobody planned for, and a lookup the catalogue wins.',
     ask: 'Before the narrow lookup: which is cheaper, the code surface or one narrow tool?'
   },
   {
+    screen: 'guard',
+    title: 'Security and writes',
+    from: 48,
+    to: 56,
+    gist: 'Six gates between a program and the estate. A write reaches a person as a diff, and is checked again as it lands.',
+    ask: 'The model asks to stop the three most expensive running VMs. Your rule: "No power-state change in Production without a person." How many of the three does it refuse?'
+  },
+  {
     screen: 'turn',
     title: 'Your turn',
-    from: 54,
-    to: 63,
+    from: 56,
+    to: 62,
     gist: 'Change a filter, a field and a rule. Predict, run, inspect.',
     ask: 'Each exercise asks its own prediction.'
   },
   {
     screen: 'results',
     title: 'What was measured',
-    from: 63,
+    from: 62,
     to: 68,
-    gist: 'Three models, six methods, 80 runs each: what holds as the model gets weaker.',
-    ask: 'On the older model, how many of 80 do the other methods get right?'
+    gist: 'Three models, eight tasks: what holds as the model gets weaker, and what a right answer costs.',
+    ask: 'On the older model the code surface gets 40 of 40. Of the other five methods, how many of 40 does the best one get?'
   },
   {
     screen: 'wrap',

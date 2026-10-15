@@ -185,7 +185,7 @@
     color: #b45309;
   }
   .a-row {
-    padding: 6px 0;
+    padding: 5px 0;
     border-top: 1px solid var(--color-border-subtle);
   }
   .a-text {
