@@ -5,7 +5,7 @@ The script for `/tour`. It walks every screen the way a presenter would: what to
 **Flow:** `problem-demo-architecture-next` (the `presentation-narrative` skill): technical audience, demo and walkthrough.
 **Audience:** engineers who design the tools an agent calls.
 **Thesis:** stop adding tools. Give the model a designed view of the data as one plain object and let it write the program. The weaker the model, the more that matters.
-**Length:** about 20 minutes at a talking pace; book 25 for questions. Seven screens, about 60 beats. Roughly half the beats are stops (stay and talk) and half are passes (one sentence, then on). A 10-minute cut is at the end.
+**Length:** about 20 minutes at a talking pace; book 25 for questions. Seven screens, 66 beats. Roughly half the beats are stops (stay and talk) and half are passes (one sentence, then on). A 10-minute cut is at the end.
 **The ask:** end on screen 7 and run the live benchmark yourself, on your own provider.
 **Setup:** `npm run dev`, a browser at 1512 × 945 and 100% zoom, open `http://localhost:5173/tour/estate`. Nothing here calls a model: screens 1 to 6 replay scripted runs over real tool results, and screen 7 reads a snapshot of saved benchmark runs.
 
@@ -69,7 +69,7 @@ On ③, ④, ⑥ and ⑦ each beat is a history entry, so the browser's Back but
 
 Beats animate for a second or two. Let the motion settle before you talk over the result. The screenshots here were taken with reduced motion on, so they show each beat's resting state.
 
-Nothing scrolls. All 66 beats were measured at 1512 × 945, and in presenter mode also at 1512 × 820, each also with 9px taken off the width for a classic scrollbar: the page is exactly the window's height. On a smaller window, zoom the browser out rather than scrolling.
+Nothing scrolls. All 66 beats were measured at 1512 × 945, and in presenter mode also at 1512 × 820, each also with 9px taken off the width for a classic scrollbar: the page is exactly the window's height, with one exception. In reading mode at 9px narrower, ③ beat 7 is 0.3px taller than the window (a line of the sample JSON wraps once more), which is enough for a classic scrollbar to show. On a smaller window, zoom the browser out rather than scrolling.
 
 ---
 

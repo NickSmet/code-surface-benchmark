@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { ArrowLeft, ArrowRight } from '@lucide/svelte';
   import { beatActionFor, moveFor, typingIn } from '$lib/tour/beat-keys';
-  import { usePresenter } from '$lib/tour/presenter.svelte';
+  import { usePresenter, type BeatReport } from '$lib/tour/presenter.svelte';
   import { crossTo } from '$lib/tour/screens';
 
   interface Link {
@@ -29,34 +29,53 @@
 
   const last = $derived(beats.length - 1);
   const groups = $derived(beats.map((b) => b.group ?? b.caption));
-  const back = $derived(at > 0 ? { href: beats[at - 1].href, label: 'Back', inScreen: true } : before ? { ...before, inScreen: false } : null);
+  // Off either end of the screen: the screens on either side. A screen names its neighbours in the tour; in the workshop,
+  // which has three more, they are whatever the workshop's list says, and Back and Next say that screen's title.
+  const around = $derived.by((): { before: Link | undefined; after: Link | undefined } => {
+    if (presenter.format !== 'workshop') return { before, after };
+    const edge = (delta: 1 | -1): Link | undefined => {
+      const to = crossTo(page.url.pathname, delta, presenter.screens);
+      return to ? { href: delta > 0 ? to.screen.href : to.screen.end, label: to.screen.title } : undefined;
+    };
+    return { before: edge(-1), after: edge(1) };
+  });
+  const back = $derived(at > 0 ? { href: beats[at - 1].href, label: 'Back', inScreen: true } : around.before ? { ...around.before, inScreen: false } : null);
   const forward = $derived(
     at < last
       ? { href: beats[at + 1].href, label: nextLabel ? nextLabel(at) : beats[at + 1].caption, inScreen: true }
-      : after
-        ? { ...after, inScreen: false }
+      : around.after
+        ? { ...around.after, inScreen: false }
         : null
   );
 
   // The presenter's rail fills as the screen is walked.
-  $effect(() => presenter.report({ at, count: beats.length }));
-  onMount(() => () => presenter.report(null));
+  let mine: BeatReport | null = null;
+  $effect(() => {
+    mine = { at, count: beats.length };
+    presenter.report(mine);
+  });
+  onMount(() => () => {
+    if (mine) presenter.release(mine);
+  });
 
   const pressable = (t: EventTarget | null): boolean => t instanceof HTMLElement && ['A', 'BUTTON', 'SUMMARY'].includes(t.tagName);
 
   /** Off the end of the screen. Read, it is the Back or Next link; presented, the neighbour is entered at its first beat going on and its last going back. */
   function cross(delta: 1 | -1): void {
     if (presenter.on) {
-      const next = crossTo(page.url.pathname, delta);
+      const next = crossTo(page.url.pathname, delta, presenter.screens);
       if (next) void goto(next.href, { noScroll: true });
       return;
     }
-    const link = delta > 0 ? after : before;
+    const link = delta > 0 ? around.after : around.before;
     if (link) void goto(link.href);
   }
 
+  /** A screen that is leaving can stay in the page for a moment (a fade that has not finished) with the address already the next screen's. Its keys must not answer for that one. */
+  const home = untrack(() => page.url.pathname);
+
   function onkeydown(e: KeyboardEvent) {
-    if (e.defaultPrevented || presenter.helpOpen || typingIn(e.target)) return;
+    if (e.defaultPrevented || page.url.pathname !== home || presenter.helpOpen || typingIn(e.target)) return;
     const action = beatActionFor(e);
     if (!action || (e.key === ' ' && pressable(e.target))) return;
     const move = moveFor(action, at, groups);

@@ -1,28 +1,32 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { ArrowUpRight, Presentation } from '@lucide/svelte';
+  import ScreenMark from './ScreenMark.svelte';
   import { usePresenter } from '$lib/tour/presenter.svelte';
-  import { SCREENS, screenIndexOf } from '$lib/tour/screens';
+  import { screenIndexOf } from '$lib/tour/screens';
 
   // `hint` is the tooltip: the bar stays one line tall so the screens below it can fit a laptop.
-  const steps = SCREENS;
   const presenter = usePresenter();
+  /** The seven of the tour, or the ten of the workshop. */
+  const steps = $derived(presenter.screens);
+  /** Ten titles do not fit a bar: past eight steps only the screen the talk is on keeps its title. */
+  const many = $derived(steps.length > 8);
 
-  const currentIndex = $derived(screenIndexOf(page.url.pathname));
+  const currentIndex = $derived(screenIndexOf(page.url.pathname, steps));
 </script>
 
 <header class="tour-top">
-  <a class="brand" href="/tour/estate" title="Interactive tour: pre-recorded, no live model">
+  <a class="brand" href={steps[0].href} title="Interactive tour: pre-recorded, no live model">
     <span class="brand-title">From tools to code surfaces</span>
     <span class="brand-sub">pre-recorded, no live model</span>
   </a>
 
   <nav aria-label="Tour steps">
-    <ol class="steps">
+    <ol class="steps" class:many>
       {#each steps as s, i (s.href)}
         <li class="step" class:done={i < currentIndex} class:current={i === currentIndex}>
           <a href={s.href} title={s.hint} aria-current={i === currentIndex ? 'step' : undefined}>
-            <span class="num">{i + 1}</span>
+            <span class="num"><ScreenMark screen={s} size={13} /></span>
             <span class="title">{s.title}</span>
           </a>
         </li>
@@ -169,6 +173,17 @@
   .live:hover,
   .present:hover {
     background: var(--color-brand-bg);
+  }
+
+  /* The workshop's ten steps would need about 1900px with every title, so the ones the talk is not on are their number or picture and a tooltip. */
+  .many .step:not(.current) .title {
+    display: none;
+  }
+  .many .step a {
+    padding-right: 4px;
+  }
+  .many .step.current a {
+    padding-right: 12px;
   }
 
   /* Seven steps, the tagline and the Present icon need about 1630px. Without the tagline they need about 1470px; with "Live" for "Live benchmark" about 1385px;

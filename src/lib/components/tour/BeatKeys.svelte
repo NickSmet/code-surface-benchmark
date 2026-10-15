@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { beatActionFor, moveFor, typingIn } from '$lib/tour/beat-keys';
-  import { usePresenter } from '$lib/tour/presenter.svelte';
+  import { usePresenter, type BeatReport } from '$lib/tour/presenter.svelte';
   import { crossTo } from '$lib/tour/screens';
 
   /**
@@ -27,11 +27,20 @@
   let { at, groups, onstep, enabled = true, spaceSteps = false, ignoreIn = 'dialog, [role=radio], [role=tab], [data-unit]' }: Props = $props();
 
   const presenter = usePresenter();
-  $effect(() => presenter.report({ at, count: groups.length }));
-  onMount(() => () => presenter.report(null));
+  let mine: BeatReport | null = null;
+  $effect(() => {
+    mine = { at, count: groups.length };
+    presenter.report(mine);
+  });
+  onMount(() => () => {
+    if (mine) presenter.release(mine);
+  });
+
+  /** A screen that is leaving can stay in the page for a moment (a fade that has not finished) with the address already the next screen's. Its keys must not answer for that one. */
+  const home = untrack(() => page.url.pathname);
 
   function onkeydown(e: KeyboardEvent): void {
-    if (!enabled || e.defaultPrevented || presenter.helpOpen || typingIn(e.target)) return;
+    if (!enabled || e.defaultPrevented || page.url.pathname !== home || presenter.helpOpen || typingIn(e.target)) return;
     const el = e.target instanceof HTMLElement ? e.target : null;
     if (el?.closest(ignoreIn)) return;
     const action = beatActionFor(e);
@@ -42,7 +51,7 @@
     e.preventDefault();
     if ('to' in move) onstep(move.to);
     else {
-      const next = crossTo(page.url.pathname, move.cross);
+      const next = crossTo(page.url.pathname, move.cross, presenter.screens);
       if (next) void goto(next.href, { noScroll: true });
     }
   }
